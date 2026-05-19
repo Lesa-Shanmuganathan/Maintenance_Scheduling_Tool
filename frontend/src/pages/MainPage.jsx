@@ -33,7 +33,6 @@ const MainPage = () => {
   
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [verificationSystems, setVerificationSystems] = useState(null);
-  const [pendingItems, setPendingItems] = useState([]);
   
   const [selectedLog, setSelectedLog] = useState(null);
 
@@ -63,15 +62,7 @@ const MainPage = () => {
     }
   }, []);
 
-  const loadPendingItems = useCallback(async () => {
-    try {
-      const { fetchPendingReview } = await import('../api');
-      const res = await fetchPendingReview();
-      setPendingItems(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
+
 
   const loadEnvironments = useCallback(async () => {
     try {
@@ -89,16 +80,13 @@ const MainPage = () => {
 
   useEffect(() => {
     loadEnvironments();
-    loadPendingItems();
-  }, [loadEnvironments, loadPendingItems]);
+  }, [loadEnvironments]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
     if (environments[newValue]) {
       loadEquipments(environments[newValue].id);
       loadLogs(environments[newValue].id);
-    } else if (newValue === environments.length) {
-      loadPendingItems();
     }
   };
 
@@ -139,7 +127,6 @@ const MainPage = () => {
         onComplete={() => {
           setVerificationSystems(null);
           loadEnvironments();
-          loadPendingItems();
         }}
       />
     );
@@ -210,10 +197,6 @@ const MainPage = () => {
                   className="py-5 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-6" 
                 />
               ))}
-              <Tab 
-                label={`Pending Review (${pendingItems.length})`}
-                className="py-5 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-6" 
-              />
             </Tabs>
             
             <div className="flex bg-gray-200/60 p-1 rounded-none border border-gray-300/50 mb-4 sm:mb-0 ml-6 sm:ml-0">
@@ -235,13 +218,7 @@ const MainPage = () => {
       </div>
 
       <TableContainer component={Paper} elevation={0} className="flex-1 overflow-y-auto border border-gray-100 rounded-none shadow-sm">
-        {activeTab === environments.length ? (
-          <VerificationTable 
-            systems={pendingItems} 
-            isPendingTab={true}
-            onActionSuccess={loadPendingItems}
-          />
-        ) : viewType === 'equipment' ? (
+        {viewType === 'equipment' ? (
         <Table stickyHeader>
           <TableHead className="bg-gray-50/80">
             <TableRow>

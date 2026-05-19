@@ -6,28 +6,20 @@ from models import db, Environment, Equipment, MaintenanceOverride, MaintenanceH
 import pandas as pd
 import pdfplumber
 import docx
-import ollama
+import requests
 import json
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import uuid
+import threading
 from sqlalchemy import text
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date
-from ollama import Client
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "https://ollama.com")
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:e4b-cloud")
-
-# Ensure the host does not contain a trailing '/api' path, which would cause duplicate endpoints when the client appends its own '/api' routes.
-if OLLAMA_HOST.rstrip("/").endswith("/api"):
-    OLLAMA_HOST = OLLAMA_HOST.rstrip("/")[: -4]
-
-ollama_client_kwargs = {"host": OLLAMA_HOST}
-if OLLAMA_API_KEY:
-    ollama_client_kwargs["headers"] = {"Authorization": f"Bearer {OLLAMA_API_KEY}"}
-
-ollama_client = Client(**ollama_client_kwargs)
+# LM Studio defaults to http://localhost:1234
+AI_API_BASE = os.getenv("AI_API_BASE", "http://localhost:1234")
+AI_API_KEY = os.getenv("AI_API_KEY", "lm-studio")
+AI_MODEL = os.getenv("AI_MODEL", "local-model") # LM studio ignores this and uses the loaded model
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -365,132 +357,48 @@ def get_maintenance_logs():
 def serve_upload(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-SYSTEM_PROMPT = """You are an expert equipment classifier for AVL, a professional automotive 
-testing company. AVL operates test facilities with three distinct environments. 
-Your job is to classify maintenance equipment into exactly one of these three 
-environments based on its name and description.
+SYSTEM_PROMPT = """You are an AVL equipment classifier. Classify equipment into exactly one of these three environments based on its name and description.
 
-ENVIRONMENT 1 — TEST BED
-A Test Bed (also called an engine testbed or powertrain testbed) is a controlled 
-environment where engines, motors, or powertrain components are tested in 
-isolation — not inside a vehicle. Equipment here is directly attached to or 
-serves a single engine test cell.
+1. Test Bed: Controlled environment where engines, motors, or powertrain components are tested in isolation (not inside a vehicle). Dedicated to a single engine test cell.
+Keywords: test bed, test cell, engine, powertrain, transmission, dynamometer, actuator, throttle, blow-by, lambda, combustion, torque, e-motor, HV, cell-specific.
 
-What belongs here:
-- Engine dynamometers and powertrain dynamometers (AC induction motors used 
-  as load units for engine or powertrain testing)
-- Throttle actuators, brake actuators, clutch actuators, gear-shift robots 
-  (used to automate engine/powertrain test runs)
-- High-precision sensors for engine parameters: temperature sensors, pressure 
-  sensors, blow-by measurement devices, lambda sensors, torque sensors
-- Test rigs for individual powertrain components (gearbox test rigs, 
-  transmission test rigs, e-motor test rigs)
-- Cooling systems dedicated to a single test cell (not shared across the 
-  facility) — e.g. coolant conditioning units specific to one engine cell
-- Pumps and valves that serve a specific engine test cell's fluid circuits
-- Electronic controllers managing a single test cell's automation
-- Air measurement and conditioning units for engine intake/exhaust on a 
-  specific test cell
-- Battery emulators and e-storage equipment used on a specific test cell
-- Test cell workstations and PUMA automation computers for a specific cell
+2. Chassis Dyno: Tests a complete vehicle on rollers (rollers sets, locking devices, pneumatic cabinets, roller motors).
+Keywords: chassis, roller, dyno, ROADSIM, VECON, restraint, centering, locking, traversing, load cell, encoder, vehicle testing, road simulation, roller covering, 2WD, 4WD.
 
-Keywords to watch for: test bed, test cell, engine, powertrain, transmission, 
-dynamometer (in engine context), actuator, throttle, blow-by, lambda, 
-combustion, torque, e-motor, HV (High Voltage powertrain), cell-specific.
+3. Common Facilities: Shared building/utility infrastructure serving multiple cells or the whole building (central cooling, shared pumps, compressed air, facility power, whole-building HVAC, fuel supply).
+Keywords: common, shared, central, facility, building, utility, supply, distribution, multi-cell, HVAC, compressed air, chilled water, demineralised, fuel supply, wastewater.
 
-ENVIRONMENT 2 — CHASSIS DYNO
-A Chassis Dynamometer tests a complete vehicle (not a bare engine) by placing 
-the vehicle's driven wheels on rollers. The vehicle is driven as if on a road 
-while the dynamometer measures performance and emissions. Based on the 
-AVL ROADSIM system manual, this environment contains:
-
-What belongs here:
-- Roller sets (the physical rollers the vehicle wheels sit on)
-- Roller locking devices and pneumatic cabinets (hold rollers in place)
-- 4-quadrant AC electric motors that drive the chassis dyno rollers
-- Drive chains, chain wheels, pendulum bearings, motor bearings for rollers
-- Automatic centering devices (guides the vehicle wheels onto the rollers)
-- Automatic roller coverings (protective covers over the roller pit)
-- Vehicle restraint systems: rods, hooks, belts, chains, T-bolts, sliding 
-  anchors that secure the vehicle to the chassis dyno
-- Power cabinets and control cabinets for the chassis dyno system
-- VECON control computers (VECON 2016, VECON 2™) — the operating and 
-  control system for chassis dynamometer vehicle testing
-- Cable remote controls, operation panels, signal towers for chassis dyno
-- Load cells and calibration devices (measure tractive force on the dyno)
-- Incremental encoders, absolute encoders, coupling and alignment units
-- Traversing units and traversing rails (move the front axle position)
-- Earthing brushes (electrical grounding on rotating parts)
-- AK-Interface, Augmented Braking, coastdown equipment
-- Safety control systems specific to the chassis dyno
-- Interface to vehicle cooling fan (the large fan that cools the vehicle 
-  during dyno testing)
-- Climatic chambers (optional enclosure around chassis dyno for temperature 
-  and humidity testing)
-- NVH (Noise, Vibration, Harshness) equipment on a chassis dyno cell
-- EMC testing equipment on a chassis dyno cell
-- ROADSIM systems and components
-
-Keywords to watch for: chassis, roller, dyno (vehicle context), ROADSIM, 
-VECON, restraint, centering, locking, traversing, load cell, encoder, 
-vehicle testing, road simulation, roller covering, 2WD, 4WD vehicle.
-
-ENVIRONMENT 3 — COMMON FACILITIES
-Common Facilities are shared utility infrastructure that serves multiple test 
-cells or the entire test facility building. This equipment is not dedicated to 
-one specific test cell — it supplies resources to many cells simultaneously.
-
-What belongs here:
-- Central cooling systems supplying chilled water to multiple test cells 
-  (cooling towers, chillers, central coolant distribution systems)
-- Shared pumps distributing water, oil, coolant, or fuel across the facility
-- Compressed air supply systems serving multiple cells (compressors, air 
-  dryers, distribution pipework)
-- Central electrical distribution equipment (main switchboards, UPS systems, 
-  power distribution panels serving multiple cells)
-- Building HVAC systems (ventilation, air handling units, exhaust extraction 
-  systems for the whole building)
-- Demineralised water systems and wastewater treatment equipment
-- Shared electronic controllers and building management systems
-- Fuel supply systems (shared fuel tanks, fuel distribution to multiple cells)
-- Shared data networks and facility-wide communication infrastructure
-- Fire suppression and safety systems covering the building
-- Shared test rigs or equipment that is moved between cells and not 
-  permanently assigned to one
-
-Keywords to watch for: common, shared, central, facility, building, utility, 
-supply, distribution, multi-cell, HVAC, compressed air, chilled water, 
-demineralised, fuel supply, wastewater.
-
----
-
-IMPORTANT RULES:
-1. Reply ONLY with valid JSON. No explanation before or after. No markdown fences.
-2. Use exactly this format:
-   {"environment": "Test Bed", "confidence": 0.88, "reason": "One sentence explanation."}
-3. environment must be exactly one of: Test Bed, Chassis Dyno, Common Facilities
-4. confidence is a float from 0.0 to 1.0
-5. If the name is too vague to classify reliably (e.g. "system - 1", "HV", 
-   "sample"), set confidence below 0.65 to flag it for human review
-6. reason must be one sentence explaining the key signal that drove the decision"""
+RULES:
+1. Reply ONLY with valid JSON. NO markdown, NO notes, NO conversational text outside the braces.
+2. Format: {"environment": "Test Bed", "confidence": 0.95, "reason": "Short 3 to 5 words max."}
+3. environment must be exactly: Test Bed, Chassis Dyno, or Common Facilities
+4. If name is too vague, set confidence below 0.65 to flag for human review."""
 
 def classify_system(name: str, description: str, retries=3) -> dict:
     for attempt in range(retries + 1):
         try:
-            response = ollama_client.chat(
-                model=OLLAMA_MODEL,
-                messages=[
+            payload = {
+                "model": AI_MODEL,
+                "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": f"Equipment name: {name}\nDescription: {description}\n\nClassify this equipment."}
                 ],
-                options={"temperature": 0}
-            )
-            raw = response["message"]["content"].strip()
-            if "```" in raw:
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
+                "temperature": 0.0,
+                "max_tokens": 150
+            }
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
+            
+            response = requests.post(f"{AI_API_BASE.rstrip('/')}/v1/chat/completions", json=payload, headers=headers)
+            response.raise_for_status()
+            
+            import re
+            raw = response.json()["choices"][0]["message"]["content"].strip()
+            
+            # Find the first { and the last } to extract just the JSON object
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                raw = match.group(0)
+                
             result = json.loads(raw)
             valid_envs = ["Test Bed", "Chassis Dyno", "Common Facilities"]
             if result.get("environment") not in valid_envs:
@@ -515,15 +423,32 @@ def classify_system(name: str, description: str, retries=3) -> dict:
                     "status": "flagged"
                 }
 
-def classify_batch(systems: list) -> list:
-    # Reduce concurrency to avoid hitting rate limits (max 3 workers)
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [
-            executor.submit(classify_system, s["name"], s.get("description", ""))
-            for s in systems
-        ]
-        results = [f.result() for f in futures]
-    return results
+TASK_STORE = {}
+
+def process_classification_task(task_id, extracted_systems):
+    try:
+        total = len(extracted_systems)
+        for i, s in enumerate(extracted_systems):
+            TASK_STORE[task_id]["current_item"] = s.get("name", "Unknown")
+            
+            classification = classify_system(s["name"], s.get("description", ""))
+            s.update(classification)
+            
+            TASK_STORE[task_id]["progress"] = i + 1
+            
+        TASK_STORE[task_id]["status"] = "completed"
+        TASK_STORE[task_id]["results"] = extracted_systems
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        TASK_STORE[task_id]["status"] = "error"
+        TASK_STORE[task_id]["error"] = str(e)
+
+@app.route('/api/task-status/<task_id>', methods=['GET'])
+def get_task_status(task_id):
+    if task_id not in TASK_STORE:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify(TASK_STORE[task_id])
 
 @app.route('/api/classify-document', methods=['POST'])
 def classify_document():
@@ -546,16 +471,13 @@ def classify_document():
 
     try:
         # Check if AI model host is reachable
-        import requests
         try:
-            headers = {}
-            if OLLAMA_API_KEY:
-                headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+            headers = {"Authorization": f"Bearer {AI_API_KEY}"}
             
-            # Simplified connection check
-            requests.get(f"{OLLAMA_HOST.rstrip('/')}/api/tags", headers=headers, timeout=5)
+            # Check LM Studio / OpenAI compatible endpoint
+            requests.get(f"{AI_API_BASE.rstrip('/')}/v1/models", headers=headers, timeout=5)
         except requests.exceptions.RequestException:
-            return jsonify({"error": f"AI model unreachable at {OLLAMA_HOST}."}), 503
+            return jsonify({"error": f"AI model unreachable at {AI_API_BASE}. Make sure LM Studio local server is running."}), 503
 
         systems = []
         if ext == 'csv':
@@ -622,11 +544,20 @@ def classify_document():
         if not extracted_systems:
             return jsonify({"error": "No equipment systems could be extracted from this document. Please check the file format."}), 422
             
-        classifications = classify_batch(extracted_systems)
-        for i, s in enumerate(extracted_systems):
-            s.update(classifications[i])
-            
-        return jsonify(extracted_systems)
+        task_id = str(uuid.uuid4())
+        TASK_STORE[task_id] = {
+            "status": "processing",
+            "progress": 0,
+            "total": len(extracted_systems),
+            "current_item": "Initializing...",
+            "results": []
+        }
+        
+        thread = threading.Thread(target=process_classification_task, args=(task_id, extracted_systems))
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({"task_id": task_id, "message": "Classification started."})
 
     except Exception as e:
         import traceback

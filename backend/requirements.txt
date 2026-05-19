@@ -15,4 +15,4 @@ pdfplumber
 openpyxl
 pandas
 python-docx
-ollama
+requests

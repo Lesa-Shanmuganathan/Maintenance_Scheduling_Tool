@@ -33,3 +33,4 @@ export const fetchMaintenanceLogs = (envId = '') => {
 export const uploadDocument = (formData) => axios.post(`${API_BASE}/classify-document`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const verifyClassification = (data) => axios.post(`${API_BASE}/verify-classification`, data);
 export const fetchPendingReview = () => axios.get(`${API_BASE}/pending-review`);
+export const fetchTaskProgress = (taskId) => axios.get(`${API_BASE}/task-status/${taskId}`);

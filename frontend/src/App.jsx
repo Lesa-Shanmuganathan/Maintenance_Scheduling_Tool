@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { AppBar, Toolbar, Typography, Container } from '@mui/material';
 import { AnimatePresence, motion } from 'framer-motion';
 import SynthesisDashboard from './pages/SynthesisDashboard';
 import MainPage from './pages/MainPage';
+import PendingReviewPage from './pages/PendingReviewPage';
+import { fetchPendingReview } from './api';
 import logo from './assets/logo.png';
 
 const Header = () => {
@@ -37,7 +39,7 @@ const Header = () => {
   );
 };
 
-const Navigation = () => {
+const Navigation = ({ pendingCount }) => {
   return (
     <nav className="border-b border-gray-200 bg-white flex justify-center sticky top-0 z-10 shrink-0">
       <Container maxWidth="xl">
@@ -63,13 +65,23 @@ const Navigation = () => {
           >
             Environments
           </NavLink>
+          <NavLink 
+            to="/pending" 
+            className={({ isActive }) => 
+              `px-6 py-4 no-underline font-semibold border-b-3 transition-colors rounded-none ${
+                isActive ? 'text-[#00A651] border-[#00A651]' : 'text-[#64748b] border-transparent hover:text-gray-900'
+              }`
+            }
+          >
+            Pending Review ({pendingCount})
+          </NavLink>
         </div>
       </Container>
     </nav>
   );
 };
 
-const MainContent = () => {
+const MainContent = ({ onPendingCountChange }) => {
   const location = useLocation();
   
   return (
@@ -85,6 +97,7 @@ const MainContent = () => {
         <Routes location={location}>
           <Route path="/" element={<SynthesisDashboard />} />
           <Route path="/environments" element={<MainPage />} />
+          <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
@@ -92,13 +105,27 @@ const MainContent = () => {
 };
 
 function App() {
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const getInitialCount = async () => {
+      try {
+        const res = await fetchPendingReview();
+        setPendingCount(res.data.length);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    getInitialCount();
+  }, []);
+
   return (
     <Router>
       <div className="flex flex-col h-screen bg-[#F8F9FA] overflow-hidden">
         <Header />
-        <Navigation />
+        <Navigation pendingCount={pendingCount} />
         <Container maxWidth="xl" className="grow flex flex-col py-8 overflow-hidden">
-          <MainContent />
+          <MainContent onPendingCountChange={setPendingCount} />
         </Container>
       </div>
     </Router>
