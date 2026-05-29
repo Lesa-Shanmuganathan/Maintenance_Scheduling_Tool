@@ -5,10 +5,12 @@ import {
   TextField, FormControl, InputLabel, Select, MenuItem, Typography 
 } from '@mui/material';
 
-const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, initialData }) => {
+const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, initialData }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    serial_number: '',
+    location: '',
     environment_id: environmentId,
     commissioning_date: format(new Date(), 'yyyy-MM-dd'),
     freq_type: 'Monthly',
@@ -21,12 +23,16 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, initialData })
     if (initialData) {
       setFormData({
         ...initialData,
+        serial_number: initialData.serial_number || '',
+        location: initialData.location || '',
         commissioning_date: initialData.commissioning_date.split('T')[0]
       });
     } else {
       setFormData({
         name: '',
         description: '',
+        serial_number: '',
+        location: '',
         environment_id: environmentId,
         commissioning_date: format(new Date(), 'yyyy-MM-dd'),
         freq_type: 'Monthly',
@@ -72,6 +78,32 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, initialData })
               placeholder="Enter system name (e.g., Dyno rig X1)"
               slotProps={{ input: { className: 'rounded-none' }, inputLabel: { className: 'bg-white px-1' } }}
             />
+
+            <TextField
+              name="serial_number"
+              label="Serial Number"
+              fullWidth
+              value={formData.serial_number}
+              onChange={handleChange}
+              placeholder="Optional"
+              slotProps={{ input: { className: 'rounded-none' }, inputLabel: { className: 'bg-white px-1' } }}
+            />
+
+            <FormControl fullWidth required>
+              <InputLabel id="location-label" className="font-bold text-gray-700 bg-white px-1">Location (Environment)</InputLabel>
+              <Select
+                labelId="location-label"
+                name="environment_id"
+                label="Location (Environment)"
+                value={formData.environment_id || ''}
+                onChange={handleChange}
+                className="rounded-none"
+              >
+                {environments && environments.map(env => (
+                  <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             
             <TextField
               name="description"

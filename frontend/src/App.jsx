@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
-import { AppBar, Toolbar, Typography, Container } from '@mui/material';
+import { BrowserRouter as Router, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { AppBar, Toolbar, Typography, Container, IconButton } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { AnimatePresence, motion } from 'framer-motion';
 import SynthesisDashboard from './pages/SynthesisDashboard';
 import MainPage from './pages/MainPage';
 import PendingReviewPage from './pages/PendingReviewPage';
+import LogsPage from './pages/LogsPage';
+import AdminPage from './pages/AdminPage';
 import { fetchPendingReview } from './api';
 import logo from './assets/logo.png';
 
 const Header = () => {
+  const navigate = useNavigate();
   return (
     <AppBar 
       position="static" 
@@ -33,13 +37,18 @@ const Header = () => {
               </Typography>
             </div>
           </div>
+          <div>
+            <IconButton onClick={() => navigate('/admin')} sx={{ color: 'white' }}>
+              <SettingsIcon fontSize="large" />
+            </IconButton>
+          </div>
         </Toolbar>
       </Container>
     </AppBar>
   );
 };
 
-const Navigation = ({ pendingCount }) => {
+const Navigation = () => {
   return (
     <nav className="border-b border-gray-200 bg-white flex justify-center sticky top-0 z-10 shrink-0">
       <Container maxWidth="xl">
@@ -66,14 +75,14 @@ const Navigation = ({ pendingCount }) => {
             Environments
           </NavLink>
           <NavLink 
-            to="/pending" 
+            to="/logs" 
             className={({ isActive }) => 
               `px-6 py-4 no-underline font-semibold border-b-3 transition-colors rounded-none ${
                 isActive ? 'text-[#00A651] border-[#00A651]' : 'text-[#64748b] border-transparent hover:text-gray-900'
               }`
             }
           >
-            Pending Review ({pendingCount})
+            Logs
           </NavLink>
         </div>
       </Container>
@@ -81,7 +90,7 @@ const Navigation = ({ pendingCount }) => {
   );
 };
 
-const MainContent = ({ onPendingCountChange }) => {
+const MainContent = ({ pendingCount, onPendingCountChange }) => {
   const location = useLocation();
   
   return (
@@ -96,8 +105,10 @@ const MainContent = ({ onPendingCountChange }) => {
       >
         <Routes location={location}>
           <Route path="/" element={<SynthesisDashboard />} />
-          <Route path="/environments" element={<MainPage />} />
+          <Route path="/environments" element={<MainPage pendingCount={pendingCount} />} />
           <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} />} />
+          <Route path="/logs" element={<LogsPage />} />
+          <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
@@ -123,9 +134,9 @@ function App() {
     <Router>
       <div className="flex flex-col h-screen bg-[#F8F9FA] overflow-hidden">
         <Header />
-        <Navigation pendingCount={pendingCount} />
+        <Navigation />
         <Container maxWidth="xl" className="grow flex flex-col py-8 overflow-hidden">
-          <MainContent onPendingCountChange={setPendingCount} />
+          <MainContent pendingCount={pendingCount} onPendingCountChange={setPendingCount} />
         </Container>
       </div>
     </Router>

@@ -7,6 +7,7 @@ class Environment(db.Model):
     __tablename__ = 'environments'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
     
     equipments = db.relationship('Equipment', backref='environment', lazy=True)
 
@@ -26,6 +27,9 @@ class Equipment(db.Model):
     ai_confidence = db.Column(db.Float, nullable=True)
     ai_reason = db.Column(db.Text, nullable=True)
     ai_predicted_env = db.Column(db.String(50), nullable=True)
+    serial_number = db.Column(db.String(100), nullable=True)
+    standby = db.Column(db.Integer, default=0)
+    standby_since = db.Column(db.DateTime, nullable=True)
 
     def to_dict(self):
         return {
@@ -43,7 +47,10 @@ class Equipment(db.Model):
             'classification_status': self.classification_status,
             'ai_confidence': self.ai_confidence,
             'ai_reason': self.ai_reason,
-            'ai_predicted_env': self.ai_predicted_env
+            'ai_predicted_env': self.ai_predicted_env,
+            'serial_number': self.serial_number,
+            'standby': self.standby,
+            'standby_since': self.standby_since.isoformat() if self.standby_since else None
         }
 
 class MaintenanceOverride(db.Model):

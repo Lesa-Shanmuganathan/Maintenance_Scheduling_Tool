@@ -42,6 +42,28 @@ def seed_database():
             db.session.commit()
         except Exception:
             db.session.rollback()
+            
+        migrations = [
+            "ALTER TABLE equipments ADD COLUMN serial_number VARCHAR(100);",
+            "ALTER TABLE equipments ADD COLUMN standby INTEGER DEFAULT 0;",
+            "ALTER TABLE equipments ADD COLUMN standby_since DATETIME;",
+            "ALTER TABLE environments ADD COLUMN description TEXT;"
+        ]
+        
+        for statement in migrations:
+            try:
+                db.session.execute(text(statement))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        try:
+            db.session.execute(text("UPDATE environments SET description = 'Equipment used directly in engine or powertrain test cells. Includes engine dynamometers, actuators, sensors, test rigs, and cell-specific cooling and pump systems.' WHERE id = 1 AND (description IS NULL OR description = '');"))
+            db.session.execute(text("UPDATE environments SET description = 'Equipment used for full-vehicle chassis dynamometer testing. Includes roller sets, restraint systems, VECON control computers, locking devices, centering devices, and load cells.' WHERE id = 2 AND (description IS NULL OR description = '');"))
+            db.session.execute(text("UPDATE environments SET description = 'Shared utility infrastructure serving multiple test cells. Includes central cooling, shared pumps, compressed air supply, electrical distribution, HVAC, and facility-wide systems.' WHERE id = 3 AND (description IS NULL OR description = '');"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         
         db.create_all()
         if not Environment.query.first():
@@ -75,7 +97,7 @@ def get_next_actual_maintenance(eq):
 @app.route('/api/environments', methods=['GET'])
 def get_environments():
     envs = Environment.query.all()
-    return jsonify([{'id': e.id, 'name': e.name} for e in envs])
+    return jsonify([{'id': e.id, 'name': e.name, 'description': e.description} for e in envs])
 
 @app.route('/api/equipments', methods=['GET'])
 def get_equipments():
@@ -111,7 +133,8 @@ def add_equipment():
             freq_days=int(data.get('freq_days', 0)),
             freq_months=int(data.get('freq_months', 0)),
             freq_years=int(data.get('freq_years', 0)),
-            last_maintenance_date=last_m_dt
+            last_maintenance_date=last_m_dt,
+            serial_number=data.get('serial_number')
         )
         db.session.add(new_eq)
         db.session.commit()
@@ -134,6 +157,7 @@ def update_equipment(id):
         if 'freq_days' in data: eq.freq_days = int(data.get('freq_days', 0))
         if 'freq_months' in data: eq.freq_months = int(data.get('freq_months', 0))
         if 'freq_years' in data: eq.freq_years = int(data.get('freq_years', 0))
+        if 'serial_number' in data: eq.serial_number = data.get('serial_number')
         
         db.session.commit()
         return jsonify(eq.to_dict()), 200
@@ -143,9 +167,33 @@ def update_equipment(id):
 @app.route('/api/equipments/<int:id>', methods=['DELETE'])
 def delete_equipment(id):
     eq = Equipment.query.get_or_404(id)
+    # delete associated history and overrides
+    MaintenanceHistory.query.filter_by(equipment_id=eq.id).delete()
+    MaintenanceOverride.query.filter_by(equipment_id=eq.id).delete()
     db.session.delete(eq)
     db.session.commit()
     return jsonify({'message': 'Deleted successfully'}), 200
+
+@app.route('/api/equipments/<int:id>/standby', methods=['PATCH'])
+def toggle_standby(id):
+    eq = Equipment.query.get_or_404(id)
+    data = request.json
+    standby_val = data.get('standby', False)
+    
+    if standby_val:
+        eq.standby = 1
+        eq.standby_since = datetime.utcnow()
+    else:
+        eq.standby = 0
+        eq.standby_since = None
+        eq.last_maintenance_date = date.today()
+        # clear any existing overrides as we are recalculating
+        MaintenanceOverride.query.filter_by(equipment_id=eq.id).delete()
+        
+    db.session.commit()
+    eq_dict = eq.to_dict()
+    eq_dict['next_maintenance_date'] = get_next_actual_maintenance(eq).isoformat()
+    return jsonify(eq_dict), 200
 
 @app.route('/api/equipments/<int:id>/maintenance', methods=['POST'])
 def complete_maintenance(id):
@@ -212,6 +260,98 @@ def complete_maintenance(id):
     eq_dict = eq.to_dict()
     eq_dict['next_maintenance_date'] = get_next_actual_maintenance(eq).isoformat()
     return jsonify(eq_dict), 200
+
+@app.route('/api/logs', methods=['GET'])
+def get_all_logs():
+    env_id = request.args.get('environment_id')
+    from_date_str = request.args.get('from_date')
+    to_date_str = request.args.get('to_date')
+    
+    query = MaintenanceHistory.query.join(Equipment, MaintenanceHistory.equipment_id == Equipment.id)
+    
+    if env_id and env_id != 'all' and env_id != '':
+        query = query.filter(Equipment.environment_id == env_id)
+        
+    if from_date_str:
+        query = query.filter(MaintenanceHistory.completion_date >= datetime.strptime(from_date_str, '%Y-%m-%d').date())
+    if to_date_str:
+        query = query.filter(MaintenanceHistory.completion_date <= datetime.strptime(to_date_str, '%Y-%m-%d').date())
+        
+    logs = query.order_by(MaintenanceHistory.completion_date.desc()).all()
+    result = []
+    for log in logs:
+        docs = log.document_path.split(',') if log.document_path else []
+        result.append({
+            'id': log.id,
+            'equipment_id': log.equipment.id,
+            'equipment_name': log.equipment.name,
+            'environment_name': log.equipment.environment.name if log.equipment.environment else None,
+            'completion_date': log.completion_date.isoformat(),
+            'person': log.person,
+            'description': log.description,
+            'document_paths': docs
+        })
+    return jsonify(result)
+
+@app.route('/api/calendar-events', methods=['GET'])
+def get_calendar_events():
+    env_id = request.args.get('environment_id')
+    month = request.args.get('month')
+    year = request.args.get('year')
+    
+    if not env_id or not month or not year:
+        return jsonify({'error': 'Missing parameters'}), 400
+        
+    try:
+        month = int(month)
+        year = int(year)
+    except:
+        return jsonify({'error': 'Invalid month or year'}), 400
+        
+    query = Equipment.query.filter_by(environment_id=env_id)
+    equipments = query.all()
+    
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    results = []
+    
+    for eq in equipments:
+        if eq.standby == 1:
+            continue
+            
+        overrides = MaintenanceOverride.query.filter_by(equipment_id=eq.id).all()
+        override_dict = {o.original_date: o.new_date for o in overrides}
+        
+        limit_date = date(year + 1 if month == 12 else year, 1 if month == 12 else month + 1, 1) - relativedelta(days=1)
+        current_theoretical = eq.last_maintenance_date
+        
+        iters = 0
+        while current_theoretical <= limit_date and iters < 2000:
+            iters += 1
+            current_theoretical = calculate_next_maintenance(
+                current_theoretical, eq.freq_type, eq.freq_days, eq.freq_months, eq.freq_years
+            )
+            if current_theoretical == eq.last_maintenance_date:
+                break
+                
+            actual_date = override_dict.get(current_theoretical, current_theoretical)
+            
+            if actual_date.month == month and actual_date.year == year:
+                today = date.today()
+                if actual_date < today:
+                    status = 'overdue'
+                elif (actual_date - today).days <= 7:
+                    status = 'due_soon'
+                else:
+                    status = 'upcoming'
+                    
+                results.append({
+                    'equipment_id': eq.id,
+                    'equipment_name': eq.name,
+                    'due_date': actual_date.isoformat(),
+                    'status': status
+                })
+    return jsonify(results)
 
 @app.route('/api/equipments/<int:id>/calendar', methods=['GET'])
 def get_equipment_calendar(id):
@@ -706,6 +846,69 @@ def get_pending_review():
             'document_source': p.document_source,
             'status': 'flagged' if p.confidence and p.confidence < 0.65 else 'pending'
         })
+    return jsonify(result)
+
+@app.route('/api/admin/environments', methods=['GET'])
+def admin_get_environments():
+    envs = Environment.query.all()
+    result = []
+    for e in envs:
+        eq_count = Equipment.query.filter_by(environment_id=e.id).count()
+        result.append({
+            'id': e.id,
+            'name': e.name,
+            'description': e.description,
+            'equipment_count': eq_count
+        })
+    return jsonify(result)
+
+@app.route('/api/admin/environments', methods=['POST'])
+def admin_create_environment():
+    data = request.json
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Name is required'}), 400
+    env = Environment(name=data['name'], description=data.get('description', ''))
+    db.session.add(env)
+    db.session.commit()
+    return jsonify({'id': env.id, 'name': env.name, 'description': env.description, 'equipment_count': 0}), 201
+
+@app.route('/api/admin/environments/<int:id>', methods=['PATCH'])
+def admin_update_environment(id):
+    env = Environment.query.get_or_404(id)
+    data = request.json
+    if 'name' in data:
+        env.name = data['name']
+    if 'description' in data:
+        env.description = data['description']
+    db.session.commit()
+    return jsonify({'id': env.id, 'name': env.name, 'description': env.description})
+
+@app.route('/api/admin/environments/<int:id>', methods=['DELETE'])
+def admin_delete_environment(id):
+    env = Environment.query.get_or_404(id)
+    # delete all equipments
+    equipments = Equipment.query.filter_by(environment_id=env.id).all()
+    for eq in equipments:
+        MaintenanceHistory.query.filter_by(equipment_id=eq.id).delete()
+        MaintenanceOverride.query.filter_by(equipment_id=eq.id).delete()
+        db.session.delete(eq)
+    
+    db.session.delete(env)
+    db.session.commit()
+    return jsonify({'message': 'Environment and its equipments deleted'})
+
+@app.route('/api/admin/equipments', methods=['GET'])
+def admin_get_equipments():
+    search = request.args.get('search', '')
+    query = Equipment.query
+    if search:
+        query = query.filter(db.or_(Equipment.name.ilike(f'%{search}%'), Equipment.serial_number.ilike(f'%{search}%')))
+    equipments = query.all()
+    
+    result = []
+    for eq in equipments:
+        eq_dict = eq.to_dict()
+        result.append(eq_dict)
     return jsonify(result)
 
 if __name__ == '__main__':
