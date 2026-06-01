@@ -299,7 +299,7 @@ def get_calendar_events():
     month = request.args.get('month')
     year = request.args.get('year')
     
-    if not env_id or not month or not year:
+    if not month or not year:
         return jsonify({'error': 'Missing parameters'}), 400
         
     try:
@@ -308,7 +308,9 @@ def get_calendar_events():
     except:
         return jsonify({'error': 'Invalid month or year'}), 400
         
-    query = Equipment.query.filter_by(environment_id=env_id)
+    query = Equipment.query
+    if env_id and env_id != 'all':
+        query = query.filter_by(environment_id=env_id)
     equipments = query.all()
     
     from datetime import date
@@ -318,39 +320,24 @@ def get_calendar_events():
     for eq in equipments:
         if eq.standby == 1:
             continue
-            
-        overrides = MaintenanceOverride.query.filter_by(equipment_id=eq.id).all()
-        override_dict = {o.original_date: o.new_date for o in overrides}
-        
-        limit_date = date(year + 1 if month == 12 else year, 1 if month == 12 else month + 1, 1) - relativedelta(days=1)
-        current_theoretical = eq.last_maintenance_date
-        
-        iters = 0
-        while current_theoretical <= limit_date and iters < 2000:
-            iters += 1
-            current_theoretical = calculate_next_maintenance(
-                current_theoretical, eq.freq_type, eq.freq_days, eq.freq_months, eq.freq_years
-            )
-            if current_theoretical == eq.last_maintenance_date:
-                break
-                
-            actual_date = override_dict.get(current_theoretical, current_theoretical)
-            
-            if actual_date.month == month and actual_date.year == year:
-                today = date.today()
-                if actual_date < today:
-                    status = 'overdue'
-                elif (actual_date - today).days <= 7:
-                    status = 'due_soon'
-                else:
-                    status = 'upcoming'
-                    
-                results.append({
-                    'equipment_id': eq.id,
-                    'equipment_name': eq.name,
-                    'due_date': actual_date.isoformat(),
-                    'status': status
-                })
+
+        actual_date = get_next_actual_maintenance(eq)
+
+        if actual_date.month == month and actual_date.year == year:
+            today = date.today()
+            if actual_date < today:
+                status = 'overdue'
+            elif (actual_date - today).days <= 7:
+                status = 'due_soon'
+            else:
+                status = 'upcoming'
+
+            results.append({
+                'equipment_id': eq.id,
+                'equipment_name': eq.name,
+                'due_date': actual_date.isoformat(),
+                'status': status
+            })
     return jsonify(results)
 
 @app.route('/api/equipments/<int:id>/calendar', methods=['GET'])

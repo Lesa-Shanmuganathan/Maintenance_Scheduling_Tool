@@ -37,7 +37,11 @@ export const fetchTaskProgress = (taskId) => axios.get(`${API_BASE}/task-status/
 
 // NEW ROUTES
 export const fetchLogs = (params) => axios.get(`${API_BASE}/logs`, { params });
-export const fetchCalendarEvents = (envId, month, year) => axios.get(`${API_BASE}/calendar-events`, { params: { environment_id: envId, month, year } });
+export const fetchCalendarEvents = (envId = '', month, year) => {
+  const params = { month, year };
+  if (envId) params.environment_id = envId;
+  return axios.get(`${API_BASE}/calendar-events`, { params });
+};
 export const toggleStandby = (id, standby) => axios.patch(`${API_BASE}/equipments/${id}/standby`, { standby });
 export const fetchAdminEnvironments = () => axios.get(`${API_BASE}/admin/environments`);
 export const createAdminEnvironment = (data) => axios.post(`${API_BASE}/admin/environments`, data);

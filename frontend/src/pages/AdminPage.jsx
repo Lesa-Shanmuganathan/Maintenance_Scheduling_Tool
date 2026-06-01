@@ -1,16 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  fetchAdminEnvironments, createAdminEnvironment, updateAdminEnvironment, deleteAdminEnvironment, fetchAdminEquipments, deleteEquipment, updateEquipment
+  fetchAdminEnvironments, createAdminEnvironment, updateAdminEnvironment, deleteAdminEnvironment
 } from '../api';
 import { Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button, TextField, IconButton } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EquipmentModal from '../components/EquipmentModal';
 
 const AdminPage = () => {
   const [environments, setEnvironments] = useState([]);
-  const [equipments, setEquipments] = useState([]);
-  const [search, setSearch] = useState('');
   
   // Environment add/edit states
   const [newEnvName, setNewEnvName] = useState('');
@@ -18,10 +15,6 @@ const AdminPage = () => {
   const [editingEnvId, setEditingEnvId] = useState(null);
   const [editEnvName, setEditEnvName] = useState('');
   const [editEnvDesc, setEditEnvDesc] = useState('');
-
-  // Equipment modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingEquipment, setEditingEquipment] = useState(null);
 
   const loadEnvironments = async () => {
     try {
@@ -32,19 +25,9 @@ const AdminPage = () => {
     }
   };
 
-  const loadEquipments = async () => {
-    try {
-      const res = await fetchAdminEquipments(search);
-      setEquipments(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   useEffect(() => {
     loadEnvironments();
-    loadEquipments();
-  }, [search]);
+  }, []);
 
   const handleAddEnv = async () => {
     if (!newEnvName) return;
@@ -67,24 +50,7 @@ const AdminPage = () => {
     if (window.confirm(msg)) {
       await deleteAdminEnvironment(env.id);
       loadEnvironments();
-      loadEquipments();
     }
-  };
-
-  const handleDeleteEq = async (id) => {
-    if (window.confirm("Are you sure you want to delete this equipment?")) {
-      await deleteEquipment(id);
-      loadEquipments();
-      loadEnvironments(); // Update counts
-    }
-  };
-
-  const handleSaveEq = async (data) => {
-    if (editingEquipment) {
-      await updateEquipment(editingEquipment.id, data);
-    }
-    setIsModalOpen(false);
-    loadEquipments();
   };
 
   return (
@@ -143,54 +109,6 @@ const AdminPage = () => {
           <Button variant="contained" className="bg-black! text-white! rounded-none" onClick={handleAddEnv}>Add Environment</Button>
         </div>
       </div>
-
-      <div className="bg-white p-6 border border-gray-100 shadow-sm flex-1 flex flex-col min-h-0">
-        <div className="flex justify-between mb-4">
-          <Typography variant="h5" className="text-[#00A651] font-bold">Manage Equipment (Global)</Typography>
-          <TextField size="small" placeholder="Search name or serial..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <TableContainer component={Paper} elevation={0} className="flex-1 overflow-y-auto border border-gray-100 rounded-none shadow-sm">
-          <Table stickyHeader>
-            <TableHead className="bg-gray-50/80">
-              <TableRow>
-                <TableCell className="font-bold! text-[#64748b]!">SYSTEM NAME</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">SERIAL NR</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">ENVIRONMENT</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">COMMISSIONING</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">FREQUENCY</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">ACTIONS</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {equipments.map(eq => (
-                <TableRow key={eq.id} hover>
-                  <TableCell>{eq.name}</TableCell>
-                  <TableCell>{eq.serial_number || '-'}</TableCell>
-                  <TableCell>{eq.environment_name}</TableCell>
-                  <TableCell>{eq.commissioning_date}</TableCell>
-                  <TableCell>{eq.freq_type}</TableCell>
-                  <TableCell>
-                    <IconButton size="small" onClick={() => { setEditingEquipment(eq); setIsModalOpen(true); }}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" className="text-red-500!" onClick={() => handleDeleteEq(eq.id)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </div>
-      
-      <EquipmentModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={handleSaveEq}
-        environmentId={editingEquipment?.environment_id}
-        initialData={editingEquipment}
-      />
     </div>
   );
 };

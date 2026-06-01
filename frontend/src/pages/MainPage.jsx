@@ -18,6 +18,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import DescriptionIcon from '@mui/icons-material/Description';
 import SortIcon from '@mui/icons-material/Sort';
+import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 
 const MainPage = ({ pendingCount }) => {
   const [environments, setEnvironments] = useState([]);
@@ -39,6 +40,7 @@ const MainPage = ({ pendingCount }) => {
   const [popoverAnchor, setPopoverAnchor] = useState(null);
   const [overrideDate, setOverrideDate] = useState('');
   const [overrideEq, setOverrideEq] = useState(null);
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
 
   const handleOpenReport = (event, log) => setSelectedLog(log);
   const handleCloseReport = () => setSelectedLog(null);
@@ -74,6 +76,11 @@ const MainPage = ({ pendingCount }) => {
     }
   };
 
+  const handleSort = (field) => {
+    setSortField(field);
+    setSortOrder(prev => sortField === field && prev === 'asc' ? 'desc' : 'asc');
+  };
+
   const handleSave = async (data) => {
     try {
       if (editingEquipment) {
@@ -82,7 +89,8 @@ const MainPage = ({ pendingCount }) => {
         await addEquipment(data);
       }
       setIsModalOpen(false);
-      loadEquipments();
+      await loadEquipments();
+      setCalendarRefreshKey(prev => prev + 1);
     } catch (err) {
       console.error(err);
     }
@@ -91,14 +99,16 @@ const MainPage = ({ pendingCount }) => {
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this equipment?")) {
       await deleteEquipment(id);
-      loadEquipments();
+      await loadEquipments();
+      setCalendarRefreshKey(prev => prev + 1);
     }
   };
 
   const handleToggleStandby = async (eq) => {
     const newStandby = eq.standby === 1 ? false : true;
     await toggleStandby(eq.id, newStandby);
-    loadEquipments();
+    await loadEquipments();
+    setCalendarRefreshKey(prev => prev + 1);
   };
 
   const openOverridePopover = (event, eq) => {
@@ -110,7 +120,8 @@ const MainPage = ({ pendingCount }) => {
   const saveOverride = async () => {
     if (overrideEq && overrideDate) {
       await setCalendarOverride(overrideEq.id, overrideEq.next_maintenance_date.split('T')[0], overrideDate);
-      loadEquipments();
+      await loadEquipments();
+      setCalendarRefreshKey(prev => prev + 1);
       setPopoverAnchor(null);
     }
   };
@@ -133,9 +144,10 @@ const MainPage = ({ pendingCount }) => {
     const isOverdue = due < today;
     const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
     
-    let colorClass = 'text-gray-800';
+    let colorClass = 'text-[#00A651] font-bold';
     if (isOverdue) colorClass = 'text-[#C0392B] font-bold';
     else if (diffDays <= 7) colorClass = 'text-[#E67E22] font-bold';
+    else if (diffDays <= 30) colorClass = 'text-blue-600 font-bold';
 
     return <span className={colorClass}>{format(due, 'MMM dd, yyyy')}</span>;
   };
@@ -153,15 +165,11 @@ const MainPage = ({ pendingCount }) => {
   }
 
   const isPendingTab = activeTab === 1;
-
-  const SortTriangle = ({ className }) => {
-    // The className prop from TableSortLabel contains the direction info
-    const isDesc = className && className.includes('desc');
-    return (
-      <span className="ml-1 text-[10px] text-gray-500 inline-block">
-        {isDesc ? '▼' : '▲'}
-      </span>
-    );
+  const sortLabelSx = {
+    '& .MuiTableSortLabel-icon': {
+      opacity: 1,
+      color: '#64748b !important'
+    }
   };
 
   return (
@@ -249,9 +257,10 @@ const MainPage = ({ pendingCount }) => {
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
                       <TableSortLabel
                         active={sortField === 'name'}
-                        direction={sortOrder}
-                        onClick={() => { setSortField('name'); setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); }}
-                        IconComponent={SortTriangle}
+                        direction={sortField === 'name' ? sortOrder : 'asc'}
+                        onClick={() => handleSort('name')}
+                        IconComponent={ArrowDropUpIcon}
+                        sx={sortLabelSx}
                       >
                         SYSTEM NAME
                       </TableSortLabel>
@@ -259,9 +268,10 @@ const MainPage = ({ pendingCount }) => {
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
                       <TableSortLabel
                         active={sortField === 'serial'}
-                        direction={sortOrder}
-                        onClick={() => { setSortField('serial'); setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); }}
-                        IconComponent={SortTriangle}
+                        direction={sortField === 'serial' ? sortOrder : 'asc'}
+                        onClick={() => handleSort('serial')}
+                        IconComponent={ArrowDropUpIcon}
+                        sx={sortLabelSx}
                       >
                         SERIAL NR
                       </TableSortLabel>
@@ -269,9 +279,10 @@ const MainPage = ({ pendingCount }) => {
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
                       <TableSortLabel
                         active={sortField === 'location'}
-                        direction={sortOrder}
-                        onClick={() => { setSortField('location'); setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); }}
-                        IconComponent={SortTriangle}
+                        direction={sortField === 'location' ? sortOrder : 'asc'}
+                        onClick={() => handleSort('location')}
+                        IconComponent={ArrowDropUpIcon}
+                        sx={sortLabelSx}
                       >
                         LOCATION
                       </TableSortLabel>
@@ -279,7 +290,17 @@ const MainPage = ({ pendingCount }) => {
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">DESCRIPTION</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">COMMISSIONING</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">FREQUENCY</TableCell>
-                    <TableCell className="font-bold! text-gray-600! whitespace-nowrap">NEXT DUE DATE</TableCell>
+                    <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
+                      <TableSortLabel
+                        active={sortField === 'next_due'}
+                        direction={sortField === 'next_due' ? sortOrder : 'asc'}
+                        onClick={() => handleSort('next_due')}
+                        IconComponent={ArrowDropUpIcon}
+                        sx={sortLabelSx}
+                      >
+                        NEXT DUE DATE
+                      </TableSortLabel>
+                    </TableCell>
                     <TableCell className="font-bold! text-gray-600! text-center whitespace-nowrap">ACTIONS</TableCell>
                   </TableRow>
                 </TableHead>
@@ -292,6 +313,7 @@ const MainPage = ({ pendingCount }) => {
                       if (sortField === 'name') { valA = a.name?.toLowerCase() || ''; valB = b.name?.toLowerCase() || ''; }
                       else if (sortField === 'serial') { valA = a.serial_number?.toLowerCase() || ''; valB = b.serial_number?.toLowerCase() || ''; }
                       else if (sortField === 'location') { valA = a.environment_name?.toLowerCase() || ''; valB = b.environment_name?.toLowerCase() || ''; }
+                      else if (sortField === 'next_due') { valA = new Date(a.next_maintenance_date || 0).getTime(); valB = new Date(b.next_maintenance_date || 0).getTime(); }
                       
                       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
                       if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
@@ -331,7 +353,7 @@ const MainPage = ({ pendingCount }) => {
                             <IconButton size="small" onClick={() => handleToggleStandby(eq)} className="p-1.5 ml-1">
                               {eq.standby === 1 ? (
                                 <div className="w-[18px] h-[18px] rounded-full border-[2.5px] border-[#C0392B] flex items-center justify-center">
-                                  <div className="w-[7px] h-[7px] rounded-full bg-[#C0392B]"></div>
+                                  <div className="w-[7px] h-[7px] bg-[#C0392B]"></div>
                                 </div>
                               ) : (
                                 <div className="w-[18px] h-[18px] rounded-full border-[2.5px] border-gray-400"></div>
@@ -353,7 +375,10 @@ const MainPage = ({ pendingCount }) => {
 
       <div className="flex-[3.5] h-full overflow-hidden bg-[#FAFAFA]">
         {!isPendingTab && (
-          <InlineCalendar environmentId={locationFilter !== 'All' ? environments.find(e => e.name === locationFilter)?.id : ''} />
+          <InlineCalendar
+            environmentId={locationFilter !== 'All' ? environments.find(e => e.name === locationFilter)?.id : ''}
+            refreshKey={calendarRefreshKey}
+          />
         )}
       </div>
 
