@@ -10,6 +10,14 @@ class Environment(db.Model):
     description = db.Column(db.Text, nullable=True)
     
     equipments = db.relationship('Equipment', backref='environment', lazy=True)
+    locations = db.relationship('Location', backref='environment', lazy=True, cascade='all, delete-orphan')
+
+class Location(db.Model):
+    __tablename__ = 'locations'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    environment_id = db.Column(db.Integer, db.ForeignKey('environments.id'), nullable=False)
 
 class Equipment(db.Model):
     __tablename__ = 'equipments'
@@ -28,6 +36,7 @@ class Equipment(db.Model):
     ai_reason = db.Column(db.Text, nullable=True)
     ai_predicted_env = db.Column(db.String(50), nullable=True)
     serial_number = db.Column(db.String(100), nullable=True)
+    location = db.Column(db.String(50), nullable=True)
     standby = db.Column(db.Integer, default=0)
     standby_since = db.Column(db.DateTime, nullable=True)
 
@@ -49,6 +58,7 @@ class Equipment(db.Model):
             'ai_reason': self.ai_reason,
             'ai_predicted_env': self.ai_predicted_env,
             'serial_number': self.serial_number,
+            'location': self.location,
             'standby': self.standby,
             'standby_since': self.standby_since.isoformat() if self.standby_since else None
         }

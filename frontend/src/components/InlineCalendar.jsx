@@ -5,7 +5,7 @@ import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isToday, parseISO } from 'date-fns';
 
-const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
+const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [overdueEquipments, setOverdueEquipments] = useState([]);
@@ -94,9 +94,9 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
   const selectedDayEvents = selectedDay ? getEventsForDay(selectedDay) : [];
 
   return (
-    <div className="bg-[#FAFAFA] border-l border-gray-200 h-full p-3 flex flex-col min-h-0">
-      <div className="flex flex-wrap justify-between items-center gap-2 mb-2 shrink-0">
-        <Typography variant="subtitle1" className="font-bold text-gray-800">
+    <div className={`bg-[#FAFAFA] border-l border-gray-200 h-full flex flex-col min-h-0 ${compact ? 'p-2' : 'p-3'}`}>
+      <div className={`flex flex-wrap justify-between items-center gap-1.5 shrink-0 ${compact ? 'mb-1.5' : 'mb-2'}`}>
+        <Typography variant={compact ? 'body2' : 'subtitle1'} className="font-bold text-gray-800">
           {format(currentDate, view === 'month' ? 'MMMM yyyy' : 'yyyy')}
         </Typography>
         <div className="flex gap-1 items-center">
@@ -113,12 +113,12 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
       </div>
 
       {view === 'month' && overdueEquipments.length > 0 && (
-        <div className="mb-2 shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1.5">
+        <div className={`shrink-0 rounded border border-red-200 bg-red-50 px-2 ${compact ? 'mb-1.5 py-1' : 'mb-2 py-1.5'}`}>
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11px] font-bold text-[#C0392B]">Overdue maintenance</div>
               <div className="text-[10px] text-red-700 truncate">
-                Oldest: {overdueEquipments[0].name} ({format(parseISO(overdueEquipments[0].next_maintenance_date), 'MMM dd, yyyy')})
+                Oldest: {overdueEquipments[0].name} ({format(parseISO(overdueEquipments[0].next_maintenance_date), 'dd MMM yyyy')})
               </div>
             </div>
             <Chip
@@ -133,13 +133,13 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
       
       {view === 'month' ? (
         <>
-          <div className="grid grid-cols-7 gap-1 mb-1 shrink-0">
+          <div className={`grid grid-cols-7 shrink-0 ${compact ? 'gap-0.5 mb-0.5' : 'gap-1 mb-1'}`}>
             {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
               <div key={d} className="text-center text-[10px] font-bold text-gray-400 py-0.5">{d}</div>
             ))}
           </div>
           
-          <div className="grid grid-cols-7 grid-rows-6 gap-1 flex-1 min-h-[300px] overflow-hidden">
+          <div className={`grid grid-cols-7 grid-rows-6 overflow-hidden ${compact ? 'gap-0.5 flex-none h-[230px]' : 'gap-1 flex-1 min-h-[300px]'}`}>
             {calendarCells.map((day, index) => {
               if (!day) {
                 return <div key={`empty-${index}`} className="bg-transparent min-h-0" />;
@@ -148,7 +148,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
               const dayEvents = getEventsForDay(day);
               const isCurrToday = isToday(day);
               return (
-                <div key={day.toString()} className={`relative bg-white border ${isCurrToday ? 'border-[#00A651]' : 'border-gray-100'} p-1 min-h-0 flex flex-col overflow-hidden`}>
+                <div key={day.toString()} className={`relative bg-white border ${isCurrToday ? 'border-[#00A651]' : 'border-gray-100'} ${compact ? 'p-0.5' : 'p-1'} min-h-0 flex flex-col overflow-hidden`}>
                   <div className={`text-[11px] font-bold ${isCurrToday ? 'text-[#00A651]' : 'text-gray-500'} ml-0.5`}>
                     {format(day, 'd')}
                   </div>
@@ -159,7 +159,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
                           type="button"
                           aria-label={`Show systems due on ${format(day, 'MMMM d')}`}
                           onClick={(event) => openDayPopover(event, day)}
-                          className="w-[18px] h-[18px] rounded-sm bg-blue-600 text-white text-[9px] leading-none font-bold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          className={`${compact ? 'w-[16px] h-[16px] text-[8px]' : 'w-[18px] h-[18px] text-[9px]'} rounded-sm bg-blue-600 text-white leading-none font-bold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300`}
                         >
                           {dayEvents.length > 99 ? '99' : dayEvents.length}
                         </button>
@@ -180,7 +180,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
           >
             <div className="w-[280px] max-w-[80vw] p-3">
               <div className="text-sm font-bold text-gray-900 mb-2">
-                {selectedDay ? format(selectedDay, 'MMMM d, yyyy') : ''}
+                {selectedDay ? format(selectedDay, 'dd MMM yyyy') : ''}
               </div>
               <div className="flex flex-col gap-1.5 max-h-[260px] overflow-y-auto pr-1">
                 {selectedDayEvents.map((ev, i) => (
@@ -211,7 +211,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
                   <div key={eq.id} className="border-b border-gray-100 pb-2 last:border-0 last:pb-0">
                     <div className="text-xs font-bold text-gray-900 truncate" title={eq.name}>{eq.name}</div>
                     <div className="text-[11px] text-gray-500">
-                      Due {format(parseISO(eq.next_maintenance_date), 'MMM dd, yyyy')}
+                      Due {format(parseISO(eq.next_maintenance_date), 'dd MMM yyyy')}
                     </div>
                   </div>
                 ))}
@@ -220,7 +220,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0 }) => {
           </Popover>
         </>
       ) : (
-        <div className="grid grid-cols-3 gap-2 flex-1">
+        <div className={`grid grid-cols-3 ${compact ? 'gap-1.5 flex-none h-[230px]' : 'gap-2 flex-1'}`}>
           {Array.from({ length: 12 }).map((_, i) => {
             const m = new Date(currentDate.getFullYear(), i, 1);
             return (

@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
+import secrets
+from functools import wraps
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
-from models import db, Environment, Equipment, MaintenanceOverride, MaintenanceHistory, PendingReview, CorrectionLog
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from models import db, Environment, Location, Equipment, MaintenanceOverride, MaintenanceHistory, PendingReview, CorrectionLog
 import pandas as pd
 import pdfplumber
 import docx
@@ -20,6 +23,9 @@ from datetime import datetime, date
 AI_API_BASE = os.getenv("AI_API_BASE", "http://localhost:1234")
 AI_API_KEY = os.getenv("AI_API_KEY", "lm-studio")
 AI_MODEL = os.getenv("AI_MODEL", "local-model") # LM studio ignores this and uses the loaded model
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_TOKEN_MAX_AGE = int(os.getenv("ADMIN_TOKEN_MAX_AGE", "28800"))
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -28,9 +34,33 @@ if not os.path.exists(UPLOAD_FOLDER):
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///maintenance.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "maintenance-scheduling-dev-secret")
 
 CORS(app)
 db.init_app(app)
+admin_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='admin-auth')
+
+def create_admin_token(username):
+    return admin_serializer.dumps({'username': username})
+
+def verify_admin_token(token):
+    try:
+        data = admin_serializer.loads(token, max_age=ADMIN_TOKEN_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    if data.get('username') != ADMIN_USERNAME:
+        return None
+    return data
+
+def require_admin_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
+        if not token or not verify_admin_token(token):
+            return jsonify({'error': 'Admin authentication required'}), 401
+        return fn(*args, **kwargs)
+    return wrapper
 
 def seed_database():
     with app.app_context():
@@ -47,7 +77,8 @@ def seed_database():
             "ALTER TABLE equipments ADD COLUMN serial_number VARCHAR(100);",
             "ALTER TABLE equipments ADD COLUMN standby INTEGER DEFAULT 0;",
             "ALTER TABLE equipments ADD COLUMN standby_since DATETIME;",
-            "ALTER TABLE environments ADD COLUMN description TEXT;"
+            "ALTER TABLE environments ADD COLUMN description TEXT;",
+            "ALTER TABLE equipments ADD COLUMN location VARCHAR(50);"
         ]
         
         for statement in migrations:
@@ -73,6 +104,19 @@ def seed_database():
                 Environment(name="Common Facilities")
             ])
             db.session.commit()
+        if not Location.query.first():
+            env_by_name = {e.name: e for e in Environment.query.all()}
+            default_locations = {
+                "Test Bed": ["E-TB12", "E-TB17", "B-TB18"],
+                "Chassis Dyno": ["PE-TB19"],
+                "Common Facilities": ["X-TB21", "X-TB22"]
+            }
+            for env_name, codes in default_locations.items():
+                env = env_by_name.get(env_name)
+                if env:
+                    for code in codes:
+                        db.session.add(Location(code=code, environment_id=env.id))
+            db.session.commit()
 
 def calculate_next_maintenance(last_date, freq_type, freq_days=0, freq_months=0, freq_years=0):
     if freq_type == 'Daily':
@@ -83,6 +127,8 @@ def calculate_next_maintenance(last_date, freq_type, freq_days=0, freq_months=0,
         return last_date + relativedelta(months=1)
     elif freq_type == 'Yearly':
         return last_date + relativedelta(years=1)
+    elif freq_type == 'Half Yearly':
+        return last_date + relativedelta(months=6)
     elif freq_type == 'Custom':
         return last_date + relativedelta(years=freq_years, months=freq_months, days=freq_days)
     return last_date # fallback
@@ -97,7 +143,30 @@ def get_next_actual_maintenance(eq):
 @app.route('/api/environments', methods=['GET'])
 def get_environments():
     envs = Environment.query.all()
-    return jsonify([{'id': e.id, 'name': e.name, 'description': e.description} for e in envs])
+    return jsonify([{
+        'id': e.id,
+        'name': e.name,
+        'description': e.description,
+        'locations': [
+            {'id': loc.id, 'code': loc.code, 'description': loc.description}
+            for loc in sorted(e.locations, key=lambda item: item.code)
+        ]
+    } for e in envs])
+
+@app.route('/api/locations', methods=['GET'])
+def get_locations():
+    env_id = request.args.get('environment_id')
+    query = Location.query
+    if env_id:
+        query = query.filter_by(environment_id=env_id)
+    locations = query.order_by(Location.code.asc()).all()
+    return jsonify([{
+        'id': loc.id,
+        'code': loc.code,
+        'description': loc.description,
+        'environment_id': loc.environment_id,
+        'environment_name': loc.environment.name if loc.environment else None
+    } for loc in locations])
 
 @app.route('/api/equipments', methods=['GET'])
 def get_equipments():
@@ -134,7 +203,8 @@ def add_equipment():
             freq_months=int(data.get('freq_months', 0)),
             freq_years=int(data.get('freq_years', 0)),
             last_maintenance_date=last_m_dt,
-            serial_number=data.get('serial_number')
+            serial_number=data.get('serial_number'),
+            location=data.get('location')
         )
         db.session.add(new_eq)
         db.session.commit()
@@ -158,6 +228,7 @@ def update_equipment(id):
         if 'freq_months' in data: eq.freq_months = int(data.get('freq_months', 0))
         if 'freq_years' in data: eq.freq_years = int(data.get('freq_years', 0))
         if 'serial_number' in data: eq.serial_number = data.get('serial_number')
+        if 'location' in data: eq.location = data.get('location')
         
         db.session.commit()
         return jsonify(eq.to_dict()), 200
@@ -286,6 +357,7 @@ def get_all_logs():
             'equipment_id': log.equipment.id,
             'equipment_name': log.equipment.name,
             'environment_name': log.equipment.environment.name if log.equipment.environment else None,
+            'location': log.equipment.location,
             'completion_date': log.completion_date.isoformat(),
             'person': log.person,
             'description': log.description,
@@ -336,7 +408,9 @@ def get_calendar_events():
                 'equipment_id': eq.id,
                 'equipment_name': eq.name,
                 'due_date': actual_date.isoformat(),
-                'status': status
+                'status': status,
+                'environment_name': eq.environment.name if eq.environment else None,
+                'location': eq.location
             })
     return jsonify(results)
 
@@ -835,7 +909,20 @@ def get_pending_review():
         })
     return jsonify(result)
 
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    data = request.json or {}
+    username = data.get('username', '')
+    password = data.get('password', '')
+    if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+        return jsonify({
+            'token': create_admin_token(username),
+            'expires_in': ADMIN_TOKEN_MAX_AGE
+        })
+    return jsonify({'error': 'Invalid admin username or password'}), 401
+
 @app.route('/api/admin/environments', methods=['GET'])
+@require_admin_auth
 def admin_get_environments():
     envs = Environment.query.all()
     result = []
@@ -845,11 +932,16 @@ def admin_get_environments():
             'id': e.id,
             'name': e.name,
             'description': e.description,
-            'equipment_count': eq_count
+            'equipment_count': eq_count,
+            'locations': [
+                {'id': loc.id, 'code': loc.code, 'description': loc.description}
+                for loc in sorted(e.locations, key=lambda item: item.code)
+            ]
         })
     return jsonify(result)
 
 @app.route('/api/admin/environments', methods=['POST'])
+@require_admin_auth
 def admin_create_environment():
     data = request.json
     if not data or not data.get('name'):
@@ -860,6 +952,7 @@ def admin_create_environment():
     return jsonify({'id': env.id, 'name': env.name, 'description': env.description, 'equipment_count': 0}), 201
 
 @app.route('/api/admin/environments/<int:id>', methods=['PATCH'])
+@require_admin_auth
 def admin_update_environment(id):
     env = Environment.query.get_or_404(id)
     data = request.json
@@ -871,6 +964,7 @@ def admin_update_environment(id):
     return jsonify({'id': env.id, 'name': env.name, 'description': env.description})
 
 @app.route('/api/admin/environments/<int:id>', methods=['DELETE'])
+@require_admin_auth
 def admin_delete_environment(id):
     env = Environment.query.get_or_404(id)
     # delete all equipments
@@ -884,7 +978,62 @@ def admin_delete_environment(id):
     db.session.commit()
     return jsonify({'message': 'Environment and its equipments deleted'})
 
+@app.route('/api/admin/locations', methods=['POST'])
+@require_admin_auth
+def admin_create_location():
+    data = request.json
+    if not data or not data.get('code') or not data.get('environment_id'):
+        return jsonify({'error': 'Environment and location code are required'}), 400
+    env = Environment.query.get_or_404(data['environment_id'])
+    loc = Location(
+        code=data['code'].strip(),
+        description=data.get('description', ''),
+        environment_id=env.id
+    )
+    db.session.add(loc)
+    db.session.commit()
+    return jsonify({
+        'id': loc.id,
+        'code': loc.code,
+        'description': loc.description,
+        'environment_id': loc.environment_id,
+        'environment_name': env.name
+    }), 201
+
+@app.route('/api/admin/locations/<int:id>', methods=['PATCH'])
+@require_admin_auth
+def admin_update_location(id):
+    loc = Location.query.get_or_404(id)
+    data = request.json
+    old_code = loc.code
+    if 'code' in data:
+        loc.code = data['code'].strip()
+    if 'description' in data:
+        loc.description = data['description']
+    if 'environment_id' in data:
+        loc.environment_id = data['environment_id']
+    if old_code != loc.code:
+        Equipment.query.filter_by(location=old_code).update({'location': loc.code})
+    db.session.commit()
+    return jsonify({
+        'id': loc.id,
+        'code': loc.code,
+        'description': loc.description,
+        'environment_id': loc.environment_id,
+        'environment_name': loc.environment.name if loc.environment else None
+    })
+
+@app.route('/api/admin/locations/<int:id>', methods=['DELETE'])
+@require_admin_auth
+def admin_delete_location(id):
+    loc = Location.query.get_or_404(id)
+    Equipment.query.filter_by(location=loc.code, environment_id=loc.environment_id).update({'location': None})
+    db.session.delete(loc)
+    db.session.commit()
+    return jsonify({'message': 'Location deleted'})
+
 @app.route('/api/admin/equipments', methods=['GET'])
+@require_admin_auth
 def admin_get_equipments():
     search = request.args.get('search', '')
     query = Equipment.query

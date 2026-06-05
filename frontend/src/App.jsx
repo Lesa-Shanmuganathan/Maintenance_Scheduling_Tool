@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { AppBar, Toolbar, Typography, Container, IconButton } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
-import { AnimatePresence, motion } from 'framer-motion';
 import SynthesisDashboard from './pages/SynthesisDashboard';
 import MainPage from './pages/MainPage';
 import PendingReviewPage from './pages/PendingReviewPage';
@@ -94,24 +93,15 @@ const MainContent = ({ pendingCount, onPendingCountChange }) => {
   const location = useLocation();
   
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ x: 30, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: -30, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="flex-1 flex flex-col h-full overflow-hidden"
-      >
-        <Routes location={location}>
-          <Route path="/" element={<SynthesisDashboard />} />
-          <Route path="/environments" element={<MainPage pendingCount={pendingCount} />} />
-          <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} />} />
-          <Route path="/logs" element={<LogsPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <Routes location={location}>
+        <Route path="/" element={<SynthesisDashboard />} />
+        <Route path="/environments" element={<MainPage pendingCount={pendingCount} />} />
+        <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} />} />
+        <Route path="/logs" element={<LogsPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+      </Routes>
+    </div>
   );
 };
 

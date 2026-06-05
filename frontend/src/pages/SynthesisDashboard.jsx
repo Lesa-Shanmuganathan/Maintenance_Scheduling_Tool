@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { fetchSynthesis, fetchEnvironments, completeMaintenance } from '../api';
 import { format } from 'date-fns';
+import InlineCalendar from '../components/InlineCalendar';
 import { 
   Typography, Button, FormControl, InputLabel, Select, MenuItem, 
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  Paper, Chip, TextField, InputAdornment, TableSortLabel, IconButton, Tooltip,
+  Paper, Chip, TextField, InputAdornment, TableSortLabel,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import FilterAltOffIcon from '@mui/icons-material/FilterAltOff';
@@ -112,110 +113,114 @@ const SynthesisDashboard = () => {
   const currentYear = defaultYear;
   const years = Array.from({length: 10}, (_, i) => currentYear - 2 + i);
 
+  const visibleTasks = tasks
+    .filter(task => task.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
-    <div className="h-full flex flex-col overflow-hidden space-y-6">
-      <div className="shrink-0 bg-white p-6 border border-gray-100 mb-2 shadow-sm">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-          <Typography variant="h5" className="text-[#00A651] font-bold">
-            Synthesis Dashboard
-          </Typography>
-          <div className="flex gap-2">
-            <Button 
-              variant={isTodayFilter ? "contained" : "outlined"} 
-              startIcon={<TodayIcon />} 
-              onClick={() => { setIsTodayFilter(!isTodayFilter); setIsOverdueFilter(false); }}
-              className={`font-bold rounded-none shrink-0 ${isTodayFilter ? 'bg-[#00A651]! text-white! border-[#00A651]!' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            >
-              Today
-            </Button>
-            <Button 
-              variant={isOverdueFilter ? "contained" : "outlined"} 
-              startIcon={<WarningAmberIcon />} 
-              onClick={() => { setIsOverdueFilter(!isOverdueFilter); setIsTodayFilter(false); }}
-              className={`font-bold rounded-none shrink-0 ${isOverdueFilter ? 'bg-red-600! text-white! border-red-600!' : 'border-gray-200 text-gray-600 hover:bg-red-50'}`}
-            >
-              Overdue
-            </Button>
-            <Button 
-              variant="outlined" 
-              startIcon={<FilterAltOffIcon />} 
-              onClick={handleReset}
-              className="font-bold border-gray-200 text-gray-600 hover:bg-gray-50 rounded-none shrink-0"
-            >
-              Reset Filters
-            </Button>
+    <div className="h-full flex overflow-hidden">
+      <div className="flex-[6.5] flex flex-col h-full bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
+        <div className="shrink-0 p-6 border-b border-gray-100">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+            <Typography variant="h5" className="text-[#00A651] font-bold">
+              Synthesis Dashboard
+            </Typography>
+            <div className="flex gap-2">
+              <Button 
+                variant={isTodayFilter ? "contained" : "outlined"} 
+                startIcon={<TodayIcon />} 
+                onClick={() => { setIsTodayFilter(!isTodayFilter); setIsOverdueFilter(false); }}
+                className={`font-bold rounded-none shrink-0 ${isTodayFilter ? 'bg-[#00A651]! text-white! border-[#00A651]!' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              >
+                Today
+              </Button>
+              <Button 
+                variant={isOverdueFilter ? "contained" : "outlined"} 
+                startIcon={<WarningAmberIcon />} 
+                onClick={() => { setIsOverdueFilter(!isOverdueFilter); setIsTodayFilter(false); }}
+                className={`font-bold rounded-none shrink-0 ${isOverdueFilter ? 'bg-red-600! text-white! border-red-600!' : 'border-gray-200 text-gray-600 hover:bg-red-50'}`}
+              >
+                Overdue
+              </Button>
+              <Button 
+                variant="outlined" 
+                startIcon={<FilterAltOffIcon />} 
+                onClick={handleReset}
+                className="font-bold border-gray-200 text-gray-600 hover:bg-gray-50 rounded-none shrink-0"
+              >
+                Reset Filters
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <TextField
+              size="small"
+              placeholder="Search by system name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full"
+              slotProps={{
+                input: {
+                  className: 'rounded-none bg-white',
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                }
+              }}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel className="font-bold text-gray-700">Environment Filter</InputLabel>
+              <Select
+                value={selectedEnv}
+                label="Environment Filter"
+                onChange={e => setSelectedEnv(e.target.value)}
+                className="rounded-none"
+              >
+                <MenuItem value="all">All Environments</MenuItem>
+                {environments.map(env => (
+                  <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth size="small" disabled={isTodayFilter || isOverdueFilter}>
+              <InputLabel className="font-bold text-gray-700">Month</InputLabel>
+              <Select
+                value={month}
+                label="Month"
+                onChange={e => setMonth(e.target.value)}
+                className="rounded-none"
+              >
+                <MenuItem value="all">All Months</MenuItem>
+                {Array.from({length: 12}, (_, i) => (
+                  <MenuItem key={i+1} value={i+1}>
+                    {new Date(0, i).toLocaleString('default', { month: 'long' })}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth size="small" disabled={isTodayFilter || isOverdueFilter}>
+              <InputLabel className="font-bold text-gray-700">Year</InputLabel>
+              <Select
+                value={year}
+                label="Year"
+                onChange={e => setYear(e.target.value)}
+                className="rounded-none"
+              >
+                <MenuItem value="all">All Years</MenuItem>
+                {years.map(y => (
+                  <MenuItem key={y} value={y}>{y}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <TextField
-            size="small"
-            placeholder="Search by system name..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full"
-            slotProps={{
-              input: {
-                className: 'rounded-none bg-white',
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              }
-            }}
-          />
-          <FormControl fullWidth size="small">
-            <InputLabel className="font-bold text-gray-700">Environment Filter</InputLabel>
-            <Select
-              value={selectedEnv}
-              label="Environment Filter"
-              onChange={e => setSelectedEnv(e.target.value)}
-              className="rounded-none"
-            >
-              <MenuItem value="all">All Environments</MenuItem>
-              {environments.map(env => (
-                <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl fullWidth size="small" disabled={isTodayFilter || isOverdueFilter}>
-            <InputLabel className="font-bold text-gray-700">Month</InputLabel>
-            <Select
-              value={month}
-              label="Month"
-              onChange={e => setMonth(e.target.value)}
-              className="rounded-none"
-            >
-              <MenuItem value="all">All Months</MenuItem>
-              {Array.from({length: 12}, (_, i) => (
-                <MenuItem key={i+1} value={i+1}>
-                  {new Date(0, i).toLocaleString('default', { month: 'long' })}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl fullWidth size="small" disabled={isTodayFilter || isOverdueFilter}>
-            <InputLabel className="font-bold text-gray-700">Year</InputLabel>
-            <Select
-              value={year}
-              label="Year"
-              onChange={e => setYear(e.target.value)}
-              className="rounded-none"
-            >
-              <MenuItem value="all">All Years</MenuItem>
-              {years.map(y => (
-                <MenuItem key={y} value={y}>{y}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </div>
-      </div>
-
-      <TableContainer component={Paper} elevation={0} className="flex-1 overflow-y-auto border border-[#e2e8f0] rounded-none shadow-none">
-        <Table stickyHeader>
+        <TableContainer component={Paper} elevation={0} className="flex-1 overflow-y-auto overflow-x-auto rounded-none shadow-none">
+        <Table stickyHeader sx={{ tableLayout: 'auto' }}>
           <TableHead className="bg-gray-100/50">
             <TableRow>
               <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">SYSTEM NAME</TableCell>
@@ -235,8 +240,7 @@ const SynthesisDashboard = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {tasks
-              .filter(task => task.name.toLowerCase().includes(searchQuery.toLowerCase()))
+            {visibleTasks
               .sort((a, b) => {
                 const dA = new Date(a.next_maintenance_date).getTime();
                 const dB = new Date(b.next_maintenance_date).getTime();
@@ -251,15 +255,13 @@ const SynthesisDashboard = () => {
                   <span className="font-semibold text-gray-900">{task.name}</span>
                 </TableCell>
                 <TableCell className="text-gray-600 font-medium">{task.environment_name}</TableCell>
-                <TableCell>
-                  <Tooltip title={task.description || "No description available"} placement="top" arrow>
-                    <div className="max-w-[240px] truncate text-gray-600 text-sm cursor-help">
-                      {task.description || "-"}
-                    </div>
-                  </Tooltip>
+                <TableCell sx={{ maxWidth: 320 }}>
+                  <div className="text-gray-600 text-sm whitespace-normal break-words leading-5">
+                    {task.description || "-"}
+                  </div>
                 </TableCell>
                 <TableCell className="font-medium text-gray-900">
-                  {format(new Date(task.next_maintenance_date), 'MMM dd, yyyy')}
+                  {format(new Date(task.next_maintenance_date), 'dd MMM yyyy')}
                 </TableCell>
                 <TableCell>
                   <Chip 
@@ -304,7 +306,7 @@ const SynthesisDashboard = () => {
               </TableRow>
             );
             })}
-            {tasks.length === 0 && (
+            {visibleTasks.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} align="center" className="py-12">
                   <Typography className="text-gray-400 italic">No maintenance tasks due for this period.</Typography>
@@ -313,7 +315,12 @@ const SynthesisDashboard = () => {
             )}
           </TableBody>
         </Table>
-      </TableContainer>
+        </TableContainer>
+      </div>
+
+      <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA]">
+        <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} compact />
+      </div>
 
       <Dialog 
         open={isCompleteModalOpen} 

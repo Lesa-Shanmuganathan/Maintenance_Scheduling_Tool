@@ -45,7 +45,11 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, 
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+      ...(name === 'environment_id' ? { location: '' } : {})
+    }));
   };
 
   const handleSubmit = (e) => {
@@ -90,17 +94,34 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, 
             />
 
             <FormControl fullWidth required>
-              <InputLabel id="location-label" className="font-bold text-gray-700 bg-white px-1">Location (Environment)</InputLabel>
+              <InputLabel id="environment-label" className="font-bold text-gray-700 bg-white px-1">Environment</InputLabel>
               <Select
-                labelId="location-label"
+                labelId="environment-label"
                 name="environment_id"
-                label="Location (Environment)"
+                label="Environment"
                 value={formData.environment_id || ''}
                 onChange={handleChange}
                 className="rounded-none"
               >
                 {environments && environments.map(env => (
                   <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth>
+              <InputLabel id="location-code-label" className="font-bold text-gray-700 bg-white px-1">Location</InputLabel>
+              <Select
+                labelId="location-code-label"
+                name="location"
+                label="Location"
+                value={formData.location || ''}
+                onChange={handleChange}
+                className="rounded-none"
+              >
+                <MenuItem value="">Unassigned</MenuItem>
+                {(environments?.find(env => env.id === formData.environment_id)?.locations || []).map(loc => (
+                  <MenuItem key={loc.id} value={loc.code}>{loc.code}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -141,6 +162,7 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, 
                 <MenuItem value="Daily">Daily</MenuItem>
                 <MenuItem value="Weekly">Weekly</MenuItem>
                 <MenuItem value="Monthly">Monthly</MenuItem>
+                <MenuItem value="Half Yearly">Half Yearly</MenuItem>
                 <MenuItem value="Yearly">Yearly</MenuItem>
                 <MenuItem value="Custom">Custom Interval</MenuItem>
               </Select>

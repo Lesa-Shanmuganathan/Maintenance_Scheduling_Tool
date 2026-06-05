@@ -8,6 +8,37 @@ body {
   @apply font-montserrat bg-[#F8F9FA] text-[#1e293b] antialiased;
 }
 
+.fc {
+  --fc-border-color: #e5e7eb;
+  --fc-today-bg-color: rgba(0, 166, 81, 0.08);
+  --fc-button-bg-color: #111827;
+  --fc-button-border-color: #111827;
+  --fc-button-hover-bg-color: #1f2937;
+  --fc-button-hover-border-color: #1f2937;
+  --fc-button-active-bg-color: #00a651;
+  --fc-button-active-border-color: #00a651;
+  font-family: inherit;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.fc .fc-button {
+  border-radius: 0;
+  font-weight: 700;
+  text-transform: capitalize;
+  box-shadow: none;
+}
+
+.fc .fc-daygrid-event {
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 
 /* Removed global border-radius: 0 !important as it interferes with MUI internal components */
-

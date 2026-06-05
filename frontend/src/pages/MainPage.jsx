@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchEnvironments, fetchEquipments, addEquipment, updateEquipment, deleteEquipment, fetchMaintenanceLogs, toggleStandby, setCalendarOverride } from '../api';
+import { fetchEnvironments, fetchEquipments, addEquipment, updateEquipment, deleteEquipment, toggleStandby, setCalendarOverride } from '../api';
 import EquipmentModal from '../components/EquipmentModal';
 import ImportDocumentModal from '../components/ImportDocumentModal';
 import VerificationTable from '../components/VerificationTable';
@@ -8,17 +8,15 @@ import PendingReviewPage from './PendingReviewPage';
 import { format } from 'date-fns';
 import { 
   Typography, Button, Tabs, Tab, Table, TableBody, TableCell, 
-  TableContainer, TableHead, TableRow, Paper, IconButton, Chip, Tooltip,
-  Dialog, TextField, InputAdornment, TableSortLabel, Popover, Badge
+  TableContainer, TableHead, TableRow, IconButton, Chip, Tooltip,
+  Dialog, TextField, TableSortLabel, Popover, Badge,
+  FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import SearchIcon from '@mui/icons-material/Search';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import DescriptionIcon from '@mui/icons-material/Description';
-import SortIcon from '@mui/icons-material/Sort';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
+import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 
 const MainPage = ({ pendingCount }) => {
   const [environments, setEnvironments] = useState([]);
@@ -30,8 +28,9 @@ const MainPage = ({ pendingCount }) => {
   const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   
+  const [environmentFilter, setEnvironmentFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All');
-  const [locationSortOrder, setLocationSortOrder] = useState('asc');
+  const [frequencyFilter, setFrequencyFilter] = useState('All');
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [verificationSystems, setVerificationSystems] = useState(null);
@@ -72,7 +71,9 @@ const MainPage = ({ pendingCount }) => {
     setActiveTab(newValue);
     if (newValue === 0) {
       loadEquipments();
+      setEnvironmentFilter('All');
       setLocationFilter('All');
+      setFrequencyFilter('All');
     }
   };
 
@@ -149,7 +150,7 @@ const MainPage = ({ pendingCount }) => {
     else if (diffDays <= 7) colorClass = 'text-[#E67E22] font-bold';
     else if (diffDays <= 30) colorClass = 'text-blue-600 font-bold';
 
-    return <span className={colorClass}>{format(due, 'MMM dd, yyyy')}</span>;
+    return <span className={colorClass}>{format(due, 'dd MMM yyyy')}</span>;
   };
 
   if (verificationSystems) {
@@ -165,6 +166,17 @@ const MainPage = ({ pendingCount }) => {
   }
 
   const isPendingTab = activeTab === 1;
+  const activeEnvironment = environmentFilter === 'All' ? null : environments.find(env => env.name === environmentFilter);
+  const activeEnvironmentId = activeEnvironment?.id || '';
+  const locationOptions = activeEnvironment
+    ? activeEnvironment.locations || []
+    : environments.flatMap(env => env.locations || []);
+  const filteredEquipments = equipments
+    .filter(eq => environmentFilter === 'All' || eq.environment_name === environmentFilter)
+    .filter(eq => locationFilter === 'All' || (eq.location || '') === locationFilter)
+    .filter(eq => frequencyFilter === 'All' || eq.freq_type === frequencyFilter)
+    .filter(eq => eq.name && eq.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const frequencyOptions = ['Daily', 'Weekly', 'Monthly', 'Half Yearly', 'Yearly', 'Custom'];
   const sortLabelSx = {
     '& .MuiTableSortLabel-icon': {
       opacity: 1,
@@ -174,7 +186,7 @@ const MainPage = ({ pendingCount }) => {
 
   return (
     <div className="h-full flex overflow-hidden">
-      <div className="flex-[6.5] flex flex-col h-full bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
+      <div className={`${isPendingTab ? 'flex-1' : 'flex-[6.5]'} flex flex-col h-full bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]`}>
         <div className="shrink-0 pt-4 px-6 border-b border-gray-100 flex flex-col gap-4">
           <Tabs 
             value={activeTab} 
@@ -198,7 +210,39 @@ const MainPage = ({ pendingCount }) => {
 
           {!isPendingTab && (
             <div className="flex flex-col gap-4 pb-4">
-              <div className="flex flex-wrap items-center justify-end gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <FormControl size="small" className="min-w-[160px]">
+                    <InputLabel id="equipment-location-filter-label">Location</InputLabel>
+                    <Select
+                      labelId="equipment-location-filter-label"
+                      value={locationFilter}
+                      label="Location"
+                      onChange={(event) => setLocationFilter(event.target.value)}
+                      className="rounded-none bg-white"
+                    >
+                      <MenuItem value="All">All Locations</MenuItem>
+                      {locationOptions.map(loc => (
+                        <MenuItem key={`${loc.id}-${loc.code}`} value={loc.code}>{loc.code}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl size="small" className="min-w-[160px]">
+                    <InputLabel id="equipment-frequency-filter-label">Frequency</InputLabel>
+                    <Select
+                      labelId="equipment-frequency-filter-label"
+                      value={frequencyFilter}
+                      label="Frequency"
+                      onChange={(event) => setFrequencyFilter(event.target.value)}
+                      className="rounded-none bg-white"
+                    >
+                      <MenuItem value="All">All Frequencies</MenuItem>
+                      {frequencyOptions.map(freq => (
+                        <MenuItem key={freq} value={freq}>{freq === 'Custom' ? 'Custom Interval' : freq}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </div>
                 <div className="flex gap-2">
                   <Button 
                     variant="outlined" 
@@ -223,20 +267,20 @@ const MainPage = ({ pendingCount }) => {
 
               {environments.length > 0 && (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 mt-1">
-                  <Typography variant="caption" className="font-bold text-gray-500 mr-2 uppercase tracking-wide">Locations:</Typography>
+                  <Typography variant="caption" className="font-bold text-gray-500 mr-2 uppercase tracking-wide">Environments:</Typography>
                   <Chip 
                     label="All" 
                     size="small"
-                    onClick={() => setLocationFilter('All')} 
-                    className={`rounded-sm font-bold cursor-pointer transition-all ${locationFilter === 'All' ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
+                    onClick={() => { setEnvironmentFilter('All'); setLocationFilter('All'); }} 
+                    className={`rounded-sm font-bold cursor-pointer transition-all ${environmentFilter === 'All' ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
                   />
                   {environments.map(env => (
                     <Chip 
                       key={env.id}
                       label={env.name} 
                       size="small"
-                      onClick={() => setLocationFilter(env.name)} 
-                      className={`rounded-sm font-bold cursor-pointer transition-all ${locationFilter === env.name ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
+                      onClick={() => { setEnvironmentFilter(env.name); setLocationFilter('All'); }} 
+                      className={`rounded-sm font-bold cursor-pointer transition-all ${environmentFilter === env.name ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
                     />
                   ))}
                 </div>
@@ -251,7 +295,7 @@ const MainPage = ({ pendingCount }) => {
           </div>
         ) : (
             <TableContainer className="flex-1 overflow-y-auto overflow-x-auto">
-              <Table stickyHeader size="small">
+              <Table stickyHeader size="small" sx={{ tableLayout: 'auto' }}>
                 <TableHead>
                   <TableRow className="bg-gray-50 border-b border-gray-200">
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
@@ -276,17 +320,7 @@ const MainPage = ({ pendingCount }) => {
                         SERIAL NR
                       </TableSortLabel>
                     </TableCell>
-                    <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
-                      <TableSortLabel
-                        active={sortField === 'location'}
-                        direction={sortField === 'location' ? sortOrder : 'asc'}
-                        onClick={() => handleSort('location')}
-                        IconComponent={ArrowDropUpIcon}
-                        sx={sortLabelSx}
-                      >
-                        LOCATION
-                      </TableSortLabel>
-                    </TableCell>
+                    <TableCell className="font-bold! text-gray-600! whitespace-nowrap">LOCATION</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">DESCRIPTION</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">COMMISSIONING</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">FREQUENCY</TableCell>
@@ -305,14 +339,12 @@ const MainPage = ({ pendingCount }) => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {equipments
-                    .filter(eq => locationFilter === 'All' || eq.environment_name === locationFilter)
-                    .filter(eq => eq.name && eq.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                  {filteredEquipments
                     .sort((a, b) => {
                       let valA = '', valB = '';
                       if (sortField === 'name') { valA = a.name?.toLowerCase() || ''; valB = b.name?.toLowerCase() || ''; }
                       else if (sortField === 'serial') { valA = a.serial_number?.toLowerCase() || ''; valB = b.serial_number?.toLowerCase() || ''; }
-                      else if (sortField === 'location') { valA = a.environment_name?.toLowerCase() || ''; valB = b.environment_name?.toLowerCase() || ''; }
+                      else if (sortField === 'location') { valA = a.location?.toLowerCase() || ''; valB = b.location?.toLowerCase() || ''; }
                       else if (sortField === 'next_due') { valA = new Date(a.next_maintenance_date || 0).getTime(); valB = new Date(b.next_maintenance_date || 0).getTime(); }
                       
                       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
@@ -323,20 +355,18 @@ const MainPage = ({ pendingCount }) => {
                     <TableRow key={eq.id} hover>
                       <TableCell className="font-bold! text-gray-900!">{eq.name || '-'}</TableCell>
                       <TableCell>{eq.serial_number || '-'}</TableCell>
-                      <TableCell>{eq.environment_name || '-'}</TableCell>
-                      <TableCell className="text-gray-500! text-xs! max-w-[150px] truncate">
-                        <Tooltip title={eq.description || ''}>
-                          <span>{eq.description || '-'}</span>
-                        </Tooltip>
+                      <TableCell>{eq.location || '-'}</TableCell>
+                      <TableCell sx={{ maxWidth: 320 }} className="text-gray-500! text-xs! whitespace-normal break-words leading-5 py-3!">
+                        {eq.description || '-'}
                       </TableCell>
-                      <TableCell className="text-gray-700!">{format(new Date(eq.commissioning_date), 'MMM dd, yyyy')}</TableCell>
+                      <TableCell className="text-gray-700!">{format(new Date(eq.commissioning_date), 'dd MMM yyyy')}</TableCell>
                       <TableCell className="font-semibold! text-gray-800!">{formatFrequency(eq)}</TableCell>
                       <TableCell>{renderDueDate(eq)}</TableCell>
                       <TableCell align="center" className="whitespace-nowrap">
                         <div className="flex justify-center gap-1">
                           <Tooltip title="Reschedule">
                             <IconButton size="small" onClick={(e) => openOverridePopover(e, eq)} className="text-blue-600!">
-                              <CalendarMonthIcon fontSize="small" />
+                              <EventRepeatIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Edit">
@@ -364,7 +394,7 @@ const MainPage = ({ pendingCount }) => {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {equipments.filter(eq => locationFilter === 'All' || eq.environment_name === locationFilter).length === 0 && (
+                  {filteredEquipments.length === 0 && (
                     <TableRow><TableCell colSpan={8} align="center" className="py-20 text-gray-400">No equipment found.</TableCell></TableRow>
                   )}
                 </TableBody>
@@ -373,14 +403,14 @@ const MainPage = ({ pendingCount }) => {
         )}
       </div>
 
-      <div className="flex-[3.5] h-full overflow-hidden bg-[#FAFAFA]">
-        {!isPendingTab && (
+      {!isPendingTab && (
+        <div className="flex-[3.5] h-full overflow-hidden bg-[#FAFAFA]">
           <InlineCalendar
-            environmentId={locationFilter !== 'All' ? environments.find(e => e.name === locationFilter)?.id : ''}
+            environmentId={activeEnvironmentId}
             refreshKey={calendarRefreshKey}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       <ImportDocumentModal 
         isOpen={isImportModalOpen}
@@ -392,7 +422,7 @@ const MainPage = ({ pendingCount }) => {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSave}
         environments={environments}
-        environmentId={locationFilter !== 'All' ? environments.find(e => e.name === locationFilter)?.id : null}
+        environmentId={activeEnvironmentId || null}
         initialData={editingEquipment}
       />
       <Popover
@@ -423,7 +453,7 @@ const MainPage = ({ pendingCount }) => {
           <div className="p-6 flex flex-col gap-4">
             <Typography variant="h6" className="font-bold text-[#00A651]">Report Details</Typography>
             <Typography><b>System:</b> {selectedLog.equipment_name}</Typography>
-            <Typography><b>Completed:</b> {format(new Date(selectedLog.completion_date), 'MMM dd, yyyy')}</Typography>
+            <Typography><b>Completed:</b> {format(new Date(selectedLog.completion_date), 'dd MMM yyyy')}</Typography>
             <Typography><b>Description:</b> {selectedLog.description}</Typography>
             {selectedLog.document_paths && selectedLog.document_paths.map((p, i) => (
               <Button key={i} href={`http://127.0.0.1:5000/${p.replace(/\\/g, '/')}`} target="_blank" variant="outlined" download className="rounded-none">
