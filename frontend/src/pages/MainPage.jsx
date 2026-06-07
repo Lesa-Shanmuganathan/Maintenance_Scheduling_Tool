@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 import { 
   Typography, Button, Tabs, Tab, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, IconButton, Chip, Tooltip,
-  Dialog, TextField, TableSortLabel, Popover, Badge,
+  Dialog, TextField, TableSortLabel, Popover,
   FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -18,7 +18,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 
-const MainPage = ({ pendingCount, refreshKey = 0, onDataMutated }) => {
+const MainPage = ({ refreshKey = 0, onDataMutated }) => {
   const [environments, setEnvironments] = useState([]);
   const [activeTab, setActiveTab] = useState(0); 
   const [equipments, setEquipments] = useState([]);
@@ -206,11 +206,7 @@ const MainPage = ({ pendingCount, refreshKey = 0, onDataMutated }) => {
               className="py-4 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-6" 
             />
             <Tab 
-              label={
-                <Badge badgeContent={pendingCount} color="error" sx={{ '& .MuiBadge-badge': { backgroundColor: '#C0392B' } }}>
-                  <span>Pending Review</span>
-                </Badge>
-              }
+              label="Pending Review"
               className="py-4 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-8" 
             />
           </Tabs>
@@ -411,10 +407,11 @@ const MainPage = ({ pendingCount, refreshKey = 0, onDataMutated }) => {
       </div>
 
       {!isPendingTab && (
-        <div className="flex-[3.5] h-full overflow-hidden bg-[#FAFAFA]">
+        <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA]">
           <InlineCalendar
             environmentId={activeEnvironmentId}
             refreshKey={calendarRefreshKey}
+            compact
           />
         </div>
       )}

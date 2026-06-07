@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
+import re
+import io
 import secrets
 from functools import wraps
 from werkzeug.utils import secure_filename
@@ -8,11 +10,10 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from models import db, Environment, Location, Equipment, MaintenanceOverride, MaintenanceHistory, PendingReview, CorrectionLog
 import pandas as pd
 import pdfplumber
+import fitz  # PyMuPDF
 import docx
 import requests
 import json
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import uuid
 import threading
 from sqlalchemy import text
@@ -575,6 +576,765 @@ RULES:
 3. environment must be exactly: Test Bed, Chassis Dyno, or Common Facilities
 4. If name is too vague, set confidence below 0.65 to flag for human review."""
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MAINTENANCE PERIOD DETECTION & NORMALIZATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Each entry: (compiled_regex, (freq_type, freq_days, freq_months, freq_years, label))
+PERIOD_REGEX_MAP = [
+    (re.compile(r'\bdaily\b|\bevery\s+day\b', re.I),
+     ('Daily',  0, 0, 0, 'Daily')),
+    (re.compile(r'\bweekly\b|\bevery\s+week\b', re.I),
+     ('Weekly', 0, 0, 0, 'Weekly')),
+    (re.compile(r'\bmonthly\b|\bevery\s+month\b', re.I),
+     ('Monthly', 0, 0, 0, 'Monthly')),
+    (re.compile(r'\b(quarterly|3[\s\-]+month(?:ly)?|every\s+3\s+months?)\b', re.I),
+     ('Custom', 0, 3, 0, '3-Monthly')),
+    (re.compile(r'\b(half[\s\-]+year(?:ly)?|6[\s\-]+month(?:ly)?|semi[\s\-]+annual|bi[\s\-]+annual|every\s+6\s+months?)\b', re.I),
+     ('Custom', 0, 6, 0, 'Half-Yearly')),
+    (re.compile(r'\b(annual(?:ly)?|year(?:ly)?|once\s+a\s+year|per\s+year|p\.a\.|p/a)\b', re.I),
+     ('Yearly', 0, 0, 0, 'Annual')),
+]
+
+def normalize_frequency(text: str):
+    """Map a free-text maintenance period to (freq_type, freq_days, freq_months, freq_years, label)."""
+    if not text:
+        return ('Yearly', 0, 0, 0, 'Annual')
+    for pattern, result in PERIOD_REGEX_MAP:
+        if pattern.search(text):
+            return result
+
+    # ── Generic N-unit fallback (catches "9 months", "2 weeks", "45 days", "2 years", etc.) ──
+    m = re.search(r'(\d+)\s*[\-]?\s*(month|week|day|year)s?', text, re.I)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        if unit == 'month':
+            return ('Custom', 0, n, 0, f'{n}-Monthly')
+        elif unit == 'week':
+            return ('Custom', n * 7, 0, 0, f'{n}-Weekly')
+        elif unit == 'day':
+            return ('Custom', n, 0, 0, f'{n}-Daily')
+        elif unit == 'year':
+            return ('Custom', 0, 0, n, f'{n}-Yearly')
+
+    return ('Yearly', 0, 0, 0, str(text).strip() or 'Annual')
+
+def detect_period_in_text(text: str):
+    """Return period tuple if a period keyword is found in text, else None."""
+    if not text:
+        return None
+    for pattern, result in PERIOD_REGEX_MAP:
+        if pattern.search(text):
+            return result
+
+    # ── Generic N-unit fallback ──
+    m = re.search(r'(\d+)\s*[\-]?\s*(month|week|day|year)s?', text, re.I)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        if unit == 'month':
+            return ('Custom', 0, n, 0, f'{n}-Monthly')
+        elif unit == 'week':
+            return ('Custom', n * 7, 0, 0, f'{n}-Weekly')
+        elif unit == 'day':
+            return ('Custom', n, 0, 0, f'{n}-Daily')
+        elif unit == 'year':
+            return ('Custom', 0, 0, n, f'{n}-Yearly')
+
+    return None
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TABLE-EXTRACTED NAME QUALITY SCORING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _score_extracted_name(name: str, description: str = '') -> float:
+    """Score how likely a parsed name is a real equipment/system (0.0–0.95).
+    Table-extracted items that look like real equipment get 0.95.
+    Items that look like metadata, pinout tables, safety circuit diagrams,
+    connector assignments, or non-equipment text get lower scores.
+    """
+    if not name:
+        return 0.10
+
+    n = name.strip()
+    n_lower = n.lower()
+    d_lower = (description or '').strip().lower()
+
+    # ── Helper: does name contain real equipment keywords? ──
+    _equipment_kws = {
+        'motor', 'pump', 'valve', 'sensor', 'actuator', 'drive', 'filter',
+        'cooler', 'heater', 'compressor', 'fan', 'blower', 'generator',
+        'transformer', 'switch', 'breaker', 'controller', 'system', 'unit',
+        'module', 'panel', 'station', 'dynamo', 'roller', 'dyno', 'inverter',
+        'conveyor', 'chiller', 'boiler', 'turbine', 'cylinder', 'bearing',
+        'coupling', 'encoder', 'transducer', 'instrument', 'gauge', 'meter',
+        'regulator', 'damper', 'absorber', 'exhaust', 'intake', 'throttle',
+        'battery', 'charger', 'rectifier', 'supply', 'conditioner',
+    }
+    has_equipment_word = any(kw in n_lower for kw in _equipment_kws)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TIER 1 — Exact matches & unmistakable garbage (confidence 0.10–0.20)
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Known non-equipment terms ──
+    non_equipment = {
+        'ascii', 'n/a', 'na', 'not applicable', 'none', 'type',
+        'type designation', 'yes', 'no', 'applicable', 'description',
+        'name', 'item', 'notes', 'remarks', 'total', 'sum', 'page',
+        'date', 'category', 'status', 'result', 'value', 'unit',
+        'qty', 'quantity', 'serial number', 'serial no', 'reference',
+        'see above', 'see below', 'performance level',
+        'mean time to dangerous failure', 'average diagnostic coverage',
+        'diagnostic coverage', 'safety function', 'safety level',
+    }
+    if n_lower in non_equipment:
+        return 0.20
+
+    # ── Short safety / electrical terms that are never equipment ──
+    short_junk = {
+        'pl a', 'pl b', 'pl c', 'pl d', 'pl e',
+        'sil 1', 'sil 2', 'sil 3', 'sil 4',
+        'gnd', 'vdc', 'nc', 'no', 'shield', 'shld', 'common',
+        'recessive', 'dominant',
+    }
+    if n_lower in short_junk:
+        return 0.15
+
+    # ── Category concatenation patterns (e.g. "Cat. B Cat. 1 Cat. 2 ...") ──
+    if re.search(r'(?:cat\.?\s*\w+[\s,]*){3,}', n_lower):
+        return 0.15
+
+    # ── Connector pinout tables (e.g. "D-Sub Buchse - 1", "D-Sub Buchse - Cover") ──
+    if re.search(r'd[\-\s]*sub\b', n_lower):
+        return 0.15
+
+    # ── Repeated pin patterns (e.g. "Pin 9 Pin 6 Pin 6 Pin 9 - 1") ──
+    if re.search(r'(?:pin\s*\d+\s*){2,}', n_lower):
+        return 0.15
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TIER 2 — Strong indicators of non-equipment (confidence 0.20–0.30)
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Safety circuit example entries (e.g. "Example 1: Category 1 PL c - X105 ...") ──
+    if re.search(r'^example\s*\d', n_lower):
+        return 0.20
+
+    # ── Quadrant mode descriptions (e.g. "Quadrant 1- - Single safety loop") ──
+    if re.search(r'quadrant\s*\d', n_lower):
+        return 0.20
+
+    # ── Connector designator + signal (e.g. "X105 (INTERLOCK) + 24V ...", "X112 (ISR) + 24V GND") ──
+    if re.search(r'^x\d+\s*\(', n_lower):
+        return 0.20
+
+    # ── Name is primarily a signal/wiring reference ──
+    # Contains electrical signal patterns without any equipment keywords
+    if not has_equipment_word and re.search(
+        r'\b(?:interlock|24v|gnd|vdc|relay\d*|can\s*[lhv]|shld|'
+        r'rs[\-\s]*(?:232|422|485)|common)\b', n_lower
+    ):
+        return 0.25
+
+    # ── Description is a known electrical / signal value (pinout table) ──
+    signal_descriptions = {
+        'gnd', 'nc', 'no', '+24vdc', '+24v', '-24v', '-', '--', '---',
+        '—', '–', 'shield', 'shld', 'common', 'can l', 'can h',
+        'can gnd', 'can v+', 'can shld', 'relay11', 'relay21',
+        'recessive', 'dominant', '+24v interlock_in_+',
+    }
+    if d_lower in signal_descriptions:
+        return 0.20
+
+    # ── Description matches a signal/pin value pattern ──
+    if d_lower and re.search(
+        r'^(?:[+-]?\d+v(?:dc)?|relay\d+|can\s+\w+|rs[\-]?\d+)$', d_lower
+    ):
+        return 0.20
+
+    # ── Description is a cross-reference (e.g. "See chapter 3.1, on page 10.") ──
+    if re.search(r'see\s+(?:chapter|page|section|figure|table)\b', d_lower):
+        return 0.25
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TIER 3 — Moderate suspicion (confidence 0.25–0.40)
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Description hints at metadata (e.g. "applicable", "not applicable") ──
+    metadata_descriptions = {'applicable', 'not applicable', 'n/a', 'yes', 'no', 'none'}
+    if d_lower in metadata_descriptions and len(n) <= 10:
+        return 0.25
+
+    # ── Contains metadata-like phrases as substrings ──
+    if re.search(r'\b(?:mttf|dc\s+avg|performance\s+level|diagnostic\s+coverage)\b', n_lower):
+        return 0.25
+
+    # ── Name has "Emergency/Power/Voltage" but is clearly a wiring entry ──
+    if not has_equipment_word and re.search(
+        r'(?:emergency|power|voltage)\s*-\s*x\d+', n_lower
+    ):
+        return 0.25
+
+    # ── Too short (≤ 2 chars) — likely a code or cell artifact ──
+    if len(n) <= 2:
+        return 0.30
+
+    # ── Too long (> 120 chars) — likely concatenated cell content ──
+    if len(n) > 120:
+        return 0.35
+
+    # ── Mostly non-alphabetic (numbers, symbols, punctuation) ──
+    alpha_ratio = sum(1 for c in n if c.isalpha()) / max(len(n), 1)
+    if alpha_ratio < 0.30:
+        return 0.30
+
+    # ── Name looks like a wiring label: "Something - X\d+ (...) + \d+V ..." ──
+    if not has_equipment_word and re.search(r'x\d+\s*\(.*\)\s*\+?\s*\d+v', n_lower):
+        return 0.25
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PASSED — Genuine equipment name
+    # ══════════════════════════════════════════════════════════════════════
+    return 0.95
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI PROMPTS — DOCUMENT-LEVEL CONTEXT & SCHEDULE EXTRACTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+DOCUMENT_CONTEXT_PROMPT = """You are analyzing a maintenance manual or technical document.
+From the text provided, determine:
+1. What environment/facility type this document primarily describes:
+   - "Test Bed": engine or powertrain test cells, engine dynamometers, combustion or powertrain testing in isolation
+   - "Chassis Dyno": full vehicle on rollers, chassis dynamometer, road simulation, roller sets, vehicle testing
+   - "Common Facilities": shared building utilities, central cooling, compressed air, HVAC, multi-cell infrastructure
+2. Your confidence (0.0 to 1.0) — be high only if the document clearly identifies the facility type
+3. A short reason (max 10 words)
+
+Reply ONLY with valid JSON, no markdown or extra text:
+{"environment": "Chassis Dyno", "confidence": 0.95, "reason": "Document describes chassis dynamometer system"}"""
+
+SCHEDULE_EXTRACTION_PROMPT = """You are extracting maintenance schedule information from a technical document.
+Extract ALL maintainable systems or components mentioned, with their maintenance frequency.
+
+For each system, return:
+- name: the system or component name
+- description: brief description if available, else empty string
+- freq_label: the maintenance period as found in the text (Daily, Weekly, Monthly, 3-Monthly, Half-Yearly, Annual)
+- freq_type: one of exactly: Daily, Weekly, Monthly, Custom, Yearly
+- freq_days: days for Custom (0 otherwise)
+- freq_months: months for Custom (0 otherwise)
+- freq_years: years for Custom (0 otherwise)
+
+If a system has multiple maintenance intervals, include it once per interval.
+Ignore generic items with no specific system name.
+
+Reply ONLY with a valid JSON array, no markdown:
+[{"name":"...","description":"...","freq_label":"...","freq_type":"...","freq_days":0,"freq_months":0,"freq_years":0}]"""
+
+def extract_document_context(text: str) -> dict:
+    """Call AI once for the full document to identify its environment/facility type."""
+    snippet = text[:8000]
+    try:
+        payload = {
+            "model": AI_MODEL,
+            "messages": [
+                {"role": "system", "content": DOCUMENT_CONTEXT_PROMPT},
+                {"role": "user", "content": f"Document text (first section):\n{snippet}"}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 200
+        }
+        hdrs = {"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
+        resp = requests.post(
+            f"{AI_API_BASE.rstrip('/')}/v1/chat/completions",
+            json=payload, headers=hdrs, timeout=30
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            result = json.loads(m.group(0))
+            valid_envs = ["Test Bed", "Chassis Dyno", "Common Facilities"]
+            if result.get("environment") not in valid_envs:
+                result["environment"] = "Common Facilities"
+                result["confidence"] = 0.0
+            result["confidence"] = round(float(result.get("confidence", 0.0)), 2)
+            print(f"[DocContext] {result}")
+            return result
+    except Exception as exc:
+        print(f"[DocContext] Failed: {exc}")
+    return {"environment": "Common Facilities", "confidence": 0.0, "reason": "Could not determine from document"}
+
+def extract_systems_from_text_ai(text: str) -> list:
+    """AI fallback: ask the model to extract systems and maintenance periods from raw text."""
+    snippet = text[:12000]
+    try:
+        payload = {
+            "model": AI_MODEL,
+            "messages": [
+                {"role": "system", "content": SCHEDULE_EXTRACTION_PROMPT},
+                {"role": "user", "content": f"Document text:\n{snippet}"}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 2000
+        }
+        hdrs = {"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
+        resp = requests.post(
+            f"{AI_API_BASE.rstrip('/')}/v1/chat/completions",
+            json=payload, headers=hdrs, timeout=60
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        m = re.search(r'\[.*\]', raw, re.DOTALL)
+        if m:
+            items = json.loads(m.group(0))
+            result = []
+            for s in items:
+                if not s.get('name'):
+                    continue
+                ft = s.get('freq_type', 'Yearly')
+                if ft not in ['Daily', 'Weekly', 'Monthly', 'Custom', 'Yearly']:
+                    ft = 'Yearly'
+                result.append({
+                    'name': str(s['name']).strip(),
+                    'description': str(s.get('description', '')).strip(),
+                    'freq_type': ft,
+                    'freq_days': int(s.get('freq_days', 0) or 0),
+                    'freq_months': int(s.get('freq_months', 0) or 0),
+                    'freq_years': int(s.get('freq_years', 0) or 0),
+                    'freq_label': s.get('freq_label', ft),
+                    'commissioning_date': None,
+                    'source': 'ai_text_extraction'
+                })
+            return result
+    except Exception as exc:
+        print(f"[TextAI] Failed: {exc}")
+    return []
+
+def _parse_tabular_records(records: list) -> list:
+    """Parse CSV/Excel rows into structured system dicts using fuzzy header matching."""
+
+    def find_val(row, keywords):
+        for key, val in row.items():
+            if not isinstance(key, str):
+                continue
+            k = key.lower().strip()
+            for kw in keywords:
+                if kw in k:
+                    return val
+        return None
+
+    extracted = []
+    for s in records:
+        name = find_val(s, ['system name', 'equipment name', 'system', 'equipment', 'name', 'item', 'asset'])
+        if name is None:
+            continue
+        name_str = str(name).strip()
+        if not name_str or name_str.lower() in ['nan', 'none', '']:
+            continue
+
+        desc = find_val(s, ['description', 'details', 'notes', 'spec', 'info'])
+        freq_raw = find_val(s, ['frequency', 'interval', 'cycle', 'maintenance', 'period', 'schedule'])
+        comm = find_val(s, ['commissioning', 'comm date', 'commission', 'date', 'installed'])
+
+        freq_str = str(freq_raw).strip() if (freq_raw is not None and not (isinstance(freq_raw, float) and pd.isna(freq_raw))) else ''
+        ft, fd, fm, fy, fl = normalize_frequency(freq_str)
+        desc_str = str(desc).strip() if (desc is not None and not (isinstance(desc, float) and pd.isna(desc))) else ''
+
+        extracted.append({
+            'name': name_str,
+            'description': desc_str,
+            'freq_type': ft,
+            'freq_days': fd,
+            'freq_months': fm,
+            'freq_years': fy,
+            'freq_label': fl,
+            'commissioning_date': str(comm).strip() if (comm is not None and not (isinstance(comm, float) and pd.isna(comm))) else None,
+            'source': 'tabular',
+            'confidence': _score_extracted_name(name_str, desc_str)
+        })
+    return extracted
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF SCHEDULE EXTRACTION  (fitz for page text + pdfplumber for tables)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _table_rows_normalize(raw_table):
+    """Convert a pdfplumber raw table to list[list[str]], dropping all-empty rows."""
+    rows = []
+    for row in raw_table:
+        cells = [str(c).strip() if c is not None else '' for c in row]
+        if any(cells):
+            rows.append(cells)
+    return rows
+
+def _is_marked(cell: str) -> bool:
+    """Return True if the cell value indicates a maintenance task is required at this interval."""
+    if not cell:
+        return False
+    c = cell.strip()
+    return c not in ('', '-', '–', '—', 'no', 'n/a', 'none', 'nan')
+
+def extract_schedule_from_pdf(file_bytes: bytes):
+    """
+    Extract maintenance systems from a PDF.
+    Returns (systems: list[dict], full_text: str).
+    """
+    full_text = ""
+    page_texts = []
+
+    # ── Phase 1: full-text extraction with fitz ──────────────────────
+    try:
+        fitz_doc = fitz.open(stream=file_bytes, filetype="pdf")
+        for pg in fitz_doc:
+            t = pg.get_text()
+            page_texts.append(t)
+            full_text += t + "\n"
+        fitz_doc.close()
+    except Exception as exc:
+        print(f"[fitz] Text extraction failed: {exc}")
+
+    # ── Phase 2: table extraction with pdfplumber ────────────────────
+    extracted = []
+    last_seen_period = None
+    last_seen_name_col = 0
+    last_seen_name_col_explicit = False
+    
+    header_kws = ('name', 'system', 'component', 'equipment', 'item', 'activity', 'task', 'check', 'action', 'description')
+    condition_kws = {'low', 'medium', 'heavy', 'high', 'normal', 'severe', 'light'}
+
+    def resolve_system_name(raw_name, parent_system, is_explicit_col):
+        """Intelligently combine parent headings with row names to fix 'Scenario 2' edge cases."""
+        if not parent_system:
+            return raw_name
+            
+        # If it's a generic condition state, always prepend parent
+        if raw_name.lower() in condition_kws:
+            return f"{parent_system} - {raw_name}"
+            
+        # If the table column lacked a proper header like 'Description' or 'Name'
+        if not is_explicit_col:
+            if parent_system.lower() not in raw_name.lower():
+                return f"{parent_system} - {raw_name}"
+                
+        # For Scenario 1: Leave it exactly as it is
+        return raw_name
+
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for pg_idx, pg in enumerate(pdf.pages):
+                pg_text = page_texts[pg_idx] if pg_idx < len(page_texts) else ""
+                
+                # Use find_tables() to retain bounding box (bbox) coordinates
+                tables = pg.find_tables()
+                if not tables:
+                    continue
+
+                for table_obj in tables:
+                    raw_table = table_obj.extract()
+                    if not raw_table or len(raw_table) < 2:
+                        continue
+
+                    rows = _table_rows_normalize(raw_table)
+                    if len(rows) < 2:
+                        continue
+
+                    headers = rows[0]
+
+                    # ── Context Extraction: Find the closest heading above the table ──
+                    table_top = table_obj.bbox[1]
+                    crop_box = (0, 0, pg.width, max(0, table_top - 2))
+                    parent_system = None
+                    try:
+                        text_above = pg.within_bbox(crop_box).extract_text()
+                        if text_above:
+                            lines = [l.strip() for l in text_above.split('\n') if l.strip()]
+                            for line in reversed(lines):
+                                if len(line) > 80: continue # Skip standard paragraphs
+                                
+                                # Match numbered headings like "8.3.1. Air filter mats"
+                                m = re.match(r'^(\d+\.)+\d*\s*(.*)', line)
+                                if m and m.group(2):
+                                    parent_system = re.sub(r'\(.*?\)', '', m.group(2)).strip()
+                                    break
+                                    
+                                # Fallback: Short title case line that isn't a period descriptor
+                                if 3 <= len(line) <= 60 and line.istitle() and not detect_period_in_text(line):
+                                    parent_system = line
+                                    break
+                    except ValueError:
+                        pass # Fails if crop box is invalid, which is fine to ignore
+
+                    # ── Try Layout A: period keywords in column headers ──
+                    period_cols = {} 
+                    for ci, h in enumerate(headers):
+                        p = detect_period_in_text(h)
+                        if p:
+                            period_cols[ci] = p
+
+                    if period_cols:
+                        # Identify name column by explicit keywords
+                        name_col_explicit = False
+                        name_col = 0
+                        for ci, h in enumerate(headers):
+                            if ci not in period_cols and any(kw in h.lower() for kw in header_kws):
+                                name_col = ci
+                                name_col_explicit = True
+                                break
+                                
+                        if not name_col_explicit:
+                            name_col = next((ci for ci in range(len(headers)) if ci not in period_cols), 0)
+                            
+                        desc_col = next(
+                            (ci for ci in range(len(headers))
+                             if ci != name_col and ci not in period_cols),
+                            None
+                        )
+
+                        last_seen_period = None
+
+                        for row in rows[1:]:
+                            raw_name = row[name_col] if name_col < len(row) else ''
+                            if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
+                                continue
+                                
+                            desc = row[desc_col] if (desc_col and desc_col < len(row)) else ''
+                            final_name = resolve_system_name(raw_name, parent_system, name_col_explicit)
+
+                            added = False
+                            for ci, period_tuple in period_cols.items():
+                                if ci < len(row) and _is_marked(row[ci]):
+                                    ft, fd, fm, fy, fl = period_tuple
+                                    extracted.append({
+                                        'name': final_name,
+                                        'description': desc,
+                                        'freq_type': ft,
+                                        'freq_days': fd,
+                                        'freq_months': fm,
+                                        'freq_years': fy,
+                                        'freq_label': fl,
+                                        'commissioning_date': None,
+                                        'source': 'pdf_layout_a',
+                                        'confidence': _score_extracted_name(final_name, desc)
+                                    })
+                                    added = True
+
+                            # Contextual fallback if cell wasn't marked
+                            if not added:
+                                pp = detect_period_in_text(pg_text)
+                                if pp:
+                                    ft, fd, fm, fy, fl = pp
+                                    extracted.append({
+                                        'name': final_name,
+                                        'description': desc,
+                                        'freq_type': ft,
+                                        'freq_days': fd,
+                                        'freq_months': fm,
+                                        'freq_years': fy,
+                                        'freq_label': fl,
+                                        'commissioning_date': None,
+                                        'source': 'pdf_layout_a_ctx',
+                                        'confidence': _score_extracted_name(final_name, desc)
+                                    })
+
+                    else:
+                        # ── Layout B: infer period from page section heading ──
+                        pp = detect_period_in_text(pg_text)
+                        data_start_idx = 1
+                        
+                        if pp:
+                            last_seen_period = pp
+                            name_col_explicit = False
+                            name_col = 0
+                            for ci, h in enumerate(headers):
+                                if any(kw in h.lower() for kw in header_kws):
+                                    name_col = ci
+                                    name_col_explicit = True
+                                    break
+                            last_seen_name_col = name_col
+                            last_seen_name_col_explicit = name_col_explicit
+                        else:
+                            if last_seen_period:
+                                pp = last_seen_period
+                                name_col = last_seen_name_col
+                                name_col_explicit = last_seen_name_col_explicit
+                                
+                                h_val = headers[name_col].lower() if name_col < len(headers) else ''
+                                if not any(kw in h_val for kw in header_kws):
+                                    data_start_idx = 0
+                            else:
+                                continue  
+
+                        ft, fd, fm, fy, fl = pp
+
+                        for row in rows[data_start_idx:]:
+                            raw_name = row[name_col] if name_col < len(row) else ''
+                            if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
+                                continue
+                                
+                            desc = ''
+                            for ci in range(len(row)):
+                                if ci != name_col and row[ci]:
+                                    desc = row[ci]
+                                    break
+
+                            final_name = resolve_system_name(raw_name, parent_system, name_col_explicit)
+
+                            extracted.append({
+                                'name': final_name,
+                                'description': desc,
+                                'freq_type': ft,
+                                'freq_days': fd,
+                                'freq_months': fm,
+                                'freq_years': fy,
+                                'freq_label': fl,
+                                'commissioning_date': None,
+                                'source': 'pdf_layout_b',
+                                'confidence': _score_extracted_name(final_name, desc)
+                            })
+
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[pdfplumber] Failed: {exc}")
+
+    return extracted, full_text
+
+def extract_schedule_from_docx(file_bytes: bytes):
+    """
+    Extract maintenance systems from a Word document.
+    """
+    W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+    doc_obj = docx.Document(io.BytesIO(file_bytes))
+    full_text = '\n'.join(p.text for p in doc_obj.paragraphs)
+
+    current_period = None
+    current_heading = None
+    extracted = []
+    
+    header_kws = ('name', 'system', 'component', 'equipment', 'item', 'activity', 'task', 'check', 'action', 'description')
+    condition_kws = {'low', 'medium', 'heavy', 'high', 'normal', 'severe', 'light'}
+    
+    def resolve_system_name(raw_name, parent_system, is_explicit_col):
+        if not parent_system: return raw_name
+        if raw_name.lower() in condition_kws: return f"{parent_system} - {raw_name}"
+        if not is_explicit_col and parent_system.lower() not in raw_name.lower():
+            return f"{parent_system} - {raw_name}"
+        return raw_name
+
+    for child in doc_obj.element.body:
+        local = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+        if local == 'p':
+            para_text = ''.join(n.text for n in child.iter(f'{{{W_NS}}}t') if n.text).strip()
+            
+            # Detect section heading
+            m = re.match(r'^(\d+\.)+\d*\s*(.*)', para_text)
+            if m and m.group(2):
+                current_heading = re.sub(r'\(.*?\)', '', m.group(2)).strip()
+            elif 3 <= len(para_text) <= 60 and para_text.istitle() and not detect_period_in_text(para_text):
+                current_heading = para_text
+                
+            p = detect_period_in_text(para_text)
+            if p:
+                current_period = p
+
+        elif local == 'tbl':
+            rows = []
+            for tr in child.iter(f'{{{W_NS}}}tr'):
+                cells = []
+                for tc in tr.iter(f'{{{W_NS}}}tc'):
+                    cell_text = ''.join(t.text for t in tc.iter(f'{{{W_NS}}}t') if t.text)
+                    cells.append(cell_text.strip())
+                if any(cells):
+                    rows.append(cells)
+
+            if len(rows) < 2:
+                continue
+
+            headers = rows[0]
+            period_cols = {}
+            for ci, h in enumerate(headers):
+                p = detect_period_in_text(h)
+                if p:
+                    period_cols[ci] = p
+
+            if period_cols:
+                name_col_explicit = False
+                name_col = 0
+                for ci, h in enumerate(headers):
+                    if ci not in period_cols and any(kw in h.lower() for kw in header_kws):
+                        name_col = ci
+                        name_col_explicit = True
+                        break
+                        
+                if not name_col_explicit:
+                    name_col = next((ci for ci in range(len(headers)) if ci not in period_cols), 0)
+                    
+                for row in rows[1:]:
+                    raw_name = row[name_col] if name_col < len(row) else ''
+                    if not raw_name:
+                        continue
+                        
+                    final_name = resolve_system_name(raw_name, current_heading, name_col_explicit)
+                    
+                    for ci, period_tuple in period_cols.items():
+                        if ci < len(row) and _is_marked(row[ci]):
+                            ft, fd, fm, fy, fl = period_tuple
+                            extracted.append({
+                                'name': final_name,
+                                'description': '',
+                                'freq_type': ft,
+                                'freq_days': fd,
+                                'freq_months': fm,
+                                'freq_years': fy,
+                                'freq_label': fl,
+                                'commissioning_date': None,
+                                'source': 'docx_layout_a',
+                                'confidence': _score_extracted_name(final_name)
+                            })
+
+            elif current_period:
+                ft, fd, fm, fy, fl = current_period
+                
+                name_col_explicit = False
+                name_col = 0
+                for ci, h in enumerate(headers):
+                    if any(kw in h.lower() for kw in header_kws):
+                        name_col = ci
+                        name_col_explicit = True
+                        break
+
+                for row in rows[1:]:
+                    raw_name = row[name_col] if name_col < len(row) else ''
+                    if not raw_name:
+                        continue
+                    desc = ''
+                    for ci in range(len(row)):
+                        if ci != name_col and row[ci]:
+                            desc = row[ci]
+                            break
+                            
+                    final_name = resolve_system_name(raw_name, current_heading, name_col_explicit)
+                            
+                    extracted.append({
+                        'name': final_name,
+                        'description': desc,
+                        'freq_type': ft,
+                        'freq_days': fd,
+                        'freq_months': fm,
+                        'freq_years': fy,
+                        'freq_label': fl,
+                        'commissioning_date': None,
+                        'source': 'docx_layout_b',
+                        'confidence': _score_extracted_name(final_name, desc)
+                    })
+
+    return extracted, full_text
+
 def classify_system(name: str, description: str, retries=3) -> dict:
     for attempt in range(retries + 1):
         try:
@@ -626,17 +1386,134 @@ def classify_system(name: str, description: str, retries=3) -> dict:
 
 TASK_STORE = {}
 
-def process_classification_task(task_id, extracted_systems):
+def process_classification_task(task_id, extracted_systems, doc_context=None, full_text=None):
+    """
+    Background worker:
+    1. Perform hybrid LLM extraction on full text to find tasks missed by table parser.
+    2. Classify each system's environment.
+    """
     try:
-        total = len(extracted_systems)
+        if full_text and full_text.strip():
+            TASK_STORE[task_id]["current_item"] = "Scanning document for additional maintenance tasks (this may take a moment)..."
+            prompt = (
+                "You are an expert maintenance engineer. Extract any system or equipment "
+                "and its maintenance schedule mentioned in the text. Return a JSON array "
+                "of objects with keys: name, description, freq_type, freq_days, freq_months, "
+                "freq_years, freq_label, confidence. "
+                "Ensure the output is STRICTLY a valid JSON array."
+            )
+            chunk_size = 12000
+            seen_keys = set((s['name'].lower().strip(), s.get('freq_label', '').lower()) for s in extracted_systems)
+            keywords = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'annual', 'maintenance', 'inspection', 'check', 'every', 'interval', 'period']
+            
+            for i in range(0, len(full_text), chunk_size):
+                chunk = full_text[i:i + chunk_size]
+                if not chunk.strip(): continue
+                if not any(kw in chunk.lower() for kw in keywords): continue
+                
+                try:
+                    payload = {
+                        "model": AI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": f"Document text:\n{chunk}"}
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 2000
+                    }
+                    hdrs = {"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
+                    resp = requests.post(f"{AI_API_BASE.rstrip('/')}/v1/chat/completions", json=payload, headers=hdrs, timeout=60)
+                    if resp.status_code == 200:
+                        raw = resp.json()["choices"][0]["message"]["content"].strip()
+                        import re
+                        import json
+                        
+                        items = []
+                        m = re.search(r'\[.*\]', raw, re.DOTALL)
+                        if m:
+                            json_str = m.group(0)
+                            try:
+                                items = json.loads(json_str)
+                            except json.JSONDecodeError:
+                                # Try to fix common JSON issues
+                                json_str = re.sub(r'\}\s*\{', '}, {', json_str)
+                                json_str = re.sub(r'\]\s*\[', '], [', json_str)
+                                json_str = re.sub(r',\s*\]', ']', json_str)
+                                json_str = re.sub(r',\s*\}', '}', json_str)
+                                try:
+                                    items = json.loads(json_str)
+                                except Exception:
+                                    pass
+                        
+                        if not items:
+                            # Fallback: extract individual objects via regex
+                            for obj_match in re.finditer(r'\{[^{}]*"name"[^{}]*\}', raw, re.DOTALL):
+                                try:
+                                    obj_str = re.sub(r',\s*\}', '}', obj_match.group(0))
+                                    items.append(json.loads(obj_str))
+                                except Exception:
+                                    pass
+                                    
+                        for s in items:
+                            if not isinstance(s, dict) or not s.get('name'): continue
+                            name_str = str(s['name']).strip()
+                            freq_label = str(s.get('freq_label', '')).strip()
+                            key = (name_str.lower(), freq_label.lower())
+                            if key not in seen_keys:
+                                seen_keys.add(key)
+                                ft = s.get('freq_type', 'Yearly')
+                                if ft not in ['Daily', 'Weekly', 'Monthly', 'Custom', 'Yearly']:
+                                    ft = 'Yearly'
+                                
+                                raw_conf = float(s.get('confidence', 0.5))
+                                if raw_conf > 1.0:
+                                    raw_conf = raw_conf / 100.0
+                                # Cap LLM-extracted confidence at 0.70 — lower than table-parsed items
+                                raw_conf = max(0.0, min(0.70, raw_conf))
+                                
+                                extracted_systems.append({
+                                    'name': name_str,
+                                    'description': str(s.get('description', '')).strip(),
+                                    'freq_type': ft,
+                                    'freq_days': int(s.get('freq_days', 0) or 0),
+                                    'freq_months': int(s.get('freq_months', 0) or 0),
+                                    'freq_years': int(s.get('freq_years', 0) or 0),
+                                    'freq_label': freq_label if freq_label else ft,
+                                    'commissioning_date': None,
+                                    'source': 'llm_extraction',
+                                    'confidence': raw_conf
+                                })
+                    # Dynamically update total items discovered
+                    TASK_STORE[task_id]["total"] = len(extracted_systems)
+                except Exception as e:
+                    print(f"[Background LLM Extraction] Failed on chunk: {e}")
+
+        use_doc_env = bool(doc_context and doc_context.get('confidence', 0) >= 0.80)
+        TASK_STORE[task_id]["total"] = len(extracted_systems) # Ensure final total is correct
+
         for i, s in enumerate(extracted_systems):
             TASK_STORE[task_id]["current_item"] = s.get("name", "Unknown")
-            
-            classification = classify_system(s["name"], s.get("description", ""))
-            s.update(classification)
-            
+
+            if use_doc_env:
+                s.update({
+                    'environment': doc_context['environment'],
+                    'classification_confidence': doc_context['confidence'],
+                    'reason': doc_context.get('reason', 'Inferred from document context'),
+                    'status': 'pending'
+                })
+            else:
+                classification = classify_system(s["name"], s.get("description", ""))
+                s['environment'] = classification.get('environment', 'Common Facilities')
+                s['classification_confidence'] = classification.get('confidence', 0.0)
+                s['reason'] = classification.get('reason', '')
+                s['status'] = classification.get('status', 'pending')
+
+            # Flag items with low extraction confidence (likely garbage/metadata)
+            if s.get('confidence', 1.0) < 0.50:
+                s['status'] = 'flagged'
+
             TASK_STORE[task_id]["progress"] = i + 1
-            
+
         TASK_STORE[task_id]["status"] = "completed"
         TASK_STORE[task_id]["results"] = extracted_systems
     except Exception as e:
@@ -653,112 +1530,115 @@ def get_task_status(task_id):
 
 @app.route('/api/classify-document', methods=['POST'])
 def classify_document():
+    """
+    Multi-format document ingestion endpoint.
+
+    Pipeline
+    --------
+    1. Read file bytes (max 20 MB).
+    2. Check AI model is reachable.
+    3. Extract systems:
+       - PDF  → extract_schedule_from_pdf()  (smart Layout A/B table parsing)
+       - DOCX → extract_schedule_from_docx() (heading-aware paragraph scan)
+       - CSV / Excel → _parse_tabular_records() (fuzzy column matching)
+    4. If PDF/DOCX and no systems from tables → AI text fallback.
+    5. Extract document-level environment context (one AI call).
+    6. Deduplicate by (name, freq_label).
+    7. Launch background classification thread.
+    """
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded."}), 400
-        
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected."}), 400
-        
-    if len(file.read()) > 20 * 1024 * 1024:
+
+    file_bytes = file.read()
+    if len(file_bytes) > 20 * 1024 * 1024:
         return jsonify({"error": "File too large. Maximum size is 20 MB."}), 413
-    file.seek(0)
-    
+
     filename = secure_filename(file.filename)
     ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-    
+
     if ext not in ['pdf', 'xlsx', 'xls', 'docx', 'csv']:
         return jsonify({"error": "Unsupported file type. Please upload PDF, Excel, Word, or CSV."}), 400
 
     try:
-        # Check if AI model host is reachable
+        # ── Step 1: verify AI reachability ──────────────────────────
         try:
-            headers = {"Authorization": f"Bearer {AI_API_KEY}"}
-            
-            # Check LM Studio / OpenAI compatible endpoint
-            requests.get(f"{AI_API_BASE.rstrip('/')}/v1/models", headers=headers, timeout=5)
+            ai_hdrs = {"Authorization": f"Bearer {AI_API_KEY}"}
+            requests.get(f"{AI_API_BASE.rstrip('/')}/v1/models", headers=ai_hdrs, timeout=5)
         except requests.exceptions.RequestException:
             return jsonify({"error": f"AI model unreachable at {AI_API_BASE}. Make sure LM Studio local server is running."}), 503
 
-        systems = []
-        if ext == 'csv':
-            df = pd.read_csv(file)
-            systems = df.to_dict('records')
-        elif ext in ['xlsx', 'xls']:
-            df = pd.read_excel(file)
-            systems = df.to_dict('records')
-        elif ext == 'pdf':
-            with pdfplumber.open(file) as pdf:
-                for page in pdf.pages:
-                    table = page.extract_table()
-                    if table and len(table) > 1:
-                        headers = [str(h).lower().strip() for h in table[0]]
-                        for row in table[1:]:
-                            record = {}
-                            for i, cell in enumerate(row):
-                                if i < len(headers):
-                                    record[headers[i]] = cell
-                            systems.append(record)
-        elif ext == 'docx':
-            doc = docx.Document(file)
-            for table in doc.tables:
-                if not table.rows: continue
-                headers = [cell.text.lower().strip() for cell in table.rows[0].cells]
-                for row in table.rows[1:]:
-                    record = {}
-                    for i, cell in enumerate(row.cells):
-                        if i < len(headers):
-                            record[headers[i]] = cell.text
-                    systems.append(record)
-        
-        # Parse records into structured format using fuzzy header matching
         extracted_systems = []
-        
-        def find_value(row, keywords):
-            for key, val in row.items():
-                if not isinstance(key, str):
-                    continue
-                k_lower = key.lower().strip()
-                for kw in keywords:
-                    if kw in k_lower:
-                        return val
-            return None
+        full_text = ""
+        doc_context = None
 
-        for s in systems:
-            # Look for name using common unstructured variations
-            name = find_value(s, ['system name', 'equipment name', 'system', 'equipment', 'name', 'item', 'asset'])
-            if not name or pd.isna(name):
-                continue
-                
-            desc = find_value(s, ['description', 'details', 'notes', 'spec', 'info'])
-            freq = find_value(s, ['frequency', 'interval', 'cycle', 'maintenance'])
-            comm_date = find_value(s, ['commissioning', 'comm date', 'commission', 'date', 'installed'])
-            
-            # Convert pandas NaN to None
-            extracted_systems.append({
-                "name": str(name).strip(),
-                "description": str(desc).strip() if pd.notna(desc) else "",
-                "frequency": str(freq).strip() if pd.notna(freq) else None,
-                "commissioning_date": str(comm_date).strip() if pd.notna(comm_date) else None
-            })
-            
-        if not extracted_systems:
+        # ── Step 2: parse file by type ───────────────────────────────
+        if ext == 'pdf':
+            extracted_systems, full_text = extract_schedule_from_pdf(file_bytes)
+            print(f"[PDF] Table extraction found {len(extracted_systems)} system-period entries.")
+
+            # Get document-level environment context
+            if full_text:
+                doc_context = extract_document_context(full_text)
+
+            # AI text fallback is now handled in the background classification task
+
+        elif ext == 'docx':
+            extracted_systems, full_text = extract_schedule_from_docx(file_bytes)
+            print(f"[DOCX] Table extraction found {len(extracted_systems)} system-period entries.")
+
+            if full_text:
+                doc_context = extract_document_context(full_text)
+
+        elif ext == 'csv':
+            df = pd.read_csv(io.BytesIO(file_bytes))
+            extracted_systems = _parse_tabular_records(df.to_dict('records'))
+
+        elif ext in ('xlsx', 'xls'):
+            df = pd.read_excel(io.BytesIO(file_bytes))
+            extracted_systems = _parse_tabular_records(df.to_dict('records'))
+
+        if not extracted_systems and not full_text:
             return jsonify({"error": "No equipment systems could be extracted from this document. Please check the file format."}), 422
-            
+
+        # ── Step 3: deduplicate by (name, freq_label) ────────────────
+        seen = set()
+        unique_systems = []
+        for s in extracted_systems:
+            key = (s['name'].lower().strip(), s.get('freq_label', '').lower())
+            if key not in seen:
+                seen.add(key)
+                unique_systems.append(s)
+        extracted_systems = unique_systems
+
+        print(f"[classify_document] {len(extracted_systems)} unique entries after dedup. doc_context={doc_context}")
+
+        # ── Step 4: launch background classification task ────────────
         task_id = str(uuid.uuid4())
         TASK_STORE[task_id] = {
             "status": "processing",
             "progress": 0,
-            "total": len(extracted_systems),
+            "total": len(extracted_systems) if extracted_systems else 1, # Prevent division by zero if empty
             "current_item": "Initializing...",
-            "results": []
+            "results": [],
+            "doc_context": doc_context
         }
-        
-        thread = threading.Thread(target=process_classification_task, args=(task_id, extracted_systems))
+
+        thread = threading.Thread(
+            target=process_classification_task,
+            args=(task_id, extracted_systems, doc_context, full_text)
+        )
         thread.daemon = True
         thread.start()
-        
-        return jsonify({"task_id": task_id, "message": "Classification started."})
+
+        return jsonify({
+            "task_id": task_id,
+            "message": "Classification started.",
+            "doc_context": doc_context
+        })
 
     except Exception as e:
         import traceback
@@ -779,13 +1659,22 @@ def verify_classification():
         return jsonify({"error": "Invalid action"}), 400
         
     try:
-        freq_type = system.get('frequency') or 'Yearly'
+        # Resolve maintenance frequency — prefer structured fields from new pipeline,
+        # fall back to legacy 'frequency' string via normalize_frequency.
+        raw_freq = system.get('freq_type') or system.get('frequency') or 'Yearly'
+        if raw_freq not in ('Daily', 'Weekly', 'Monthly', 'Custom', 'Yearly'):
+            raw_freq, _fd, _fm, _fy, _ = normalize_frequency(raw_freq)
+        freq_type = raw_freq
+        freq_days = int(system.get('freq_days', 0) or 0)
+        freq_months = int(system.get('freq_months', 0) or 0)
+        freq_years = int(system.get('freq_years', 0) or 0)
+
         comm_date_str = system.get('commissioning_date')
         try:
             comm_date = datetime.strptime(comm_date_str, '%Y-%m-%d').date() if comm_date_str else date.today()
-        except:
+        except Exception:
             comm_date = date.today()
-            
+
         if action == 'accept':
             env_id = ENV_MAP.get(system.get('environment'), 3)
             new_eq = Equipment(
@@ -794,9 +1683,12 @@ def verify_classification():
                 environment_id=env_id,
                 commissioning_date=comm_date,
                 freq_type=freq_type,
+                freq_days=freq_days,
+                freq_months=freq_months,
+                freq_years=freq_years,
                 last_maintenance_date=comm_date,
                 classification_status='accepted',
-                ai_confidence=system.get('confidence'),
+                ai_confidence=system.get('classification_confidence', system.get('confidence')),
                 ai_reason=system.get('reason'),
                 ai_predicted_env=system.get('environment')
             )
@@ -804,7 +1696,7 @@ def verify_classification():
             log = CorrectionLog(
                 system_name=system.get('name'),
                 ai_predicted=system.get('environment'),
-                confidence=system.get('confidence'),
+                confidence=system.get('classification_confidence', system.get('confidence')),
                 human_action='accept',
                 document_source=doc_source,
                 reviewer=reviewer
@@ -815,12 +1707,24 @@ def verify_classification():
         elif action == 'edit':
             corrected_env = data.get('corrected_environment') or system.get('environment')
             env_id = ENV_MAP.get(corrected_env, 3)
+
+            # Allow reviewer to supply a commissioning date during the edit step
+            corrected_date_str = data.get('corrected_commissioning_date')
+            if corrected_date_str:
+                try:
+                    comm_date = datetime.strptime(corrected_date_str, '%Y-%m-%d').date()
+                except Exception:
+                    pass  # keep existing comm_date
+
             new_eq = Equipment(
                 name=data.get('corrected_name') or system.get('name', 'Unknown'),
                 description=data.get('corrected_description') or system.get('description', ''),
                 environment_id=env_id,
                 commissioning_date=comm_date,
                 freq_type=freq_type,
+                freq_days=freq_days,
+                freq_months=freq_months,
+                freq_years=freq_years,
                 last_maintenance_date=comm_date,
                 classification_status='accepted',
                 ai_confidence=system.get('confidence'),
@@ -841,6 +1745,7 @@ def verify_classification():
             db.session.commit()
             
         elif action == 'hold':
+            # Store freq_label so normalize_frequency can reconstruct freq details later
             pending = PendingReview(
                 ai_predicted=system.get('environment'),
                 confidence=system.get('confidence'),
@@ -849,7 +1754,7 @@ def verify_classification():
                 document_source=doc_source,
                 name=system.get('name'),
                 description=system.get('description'),
-                frequency=system.get('frequency'),
+                frequency=system.get('freq_label') or system.get('freq_type') or system.get('frequency'),
                 commissioning_date=system.get('commissioning_date')
             )
             db.session.add(pending)
@@ -1050,5 +1955,3 @@ def admin_get_equipments():
 if __name__ == '__main__':
     seed_database()
     app.run(debug=True, port=5000)
-
-

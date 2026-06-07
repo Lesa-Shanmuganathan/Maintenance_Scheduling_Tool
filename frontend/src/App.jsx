@@ -96,7 +96,7 @@ const MainContent = ({ pendingCount, onPendingCountChange, refreshKey, onDataMut
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <Routes location={location}>
         <Route path="/" element={<SynthesisDashboard refreshKey={refreshKey} />} />
-        <Route path="/environments" element={<MainPage pendingCount={pendingCount} refreshKey={refreshKey} onDataMutated={onDataMutated} />} />
+        <Route path="/environments" element={<MainPage refreshKey={refreshKey} onDataMutated={onDataMutated} />} />
         <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} onDataMutated={onDataMutated} />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/admin" element={<AdminPage />} />
