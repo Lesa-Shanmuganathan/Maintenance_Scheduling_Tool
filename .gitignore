@@ -61,3 +61,4 @@ uploads/*
 # Test/Sample files
 sample_import_test.csv
 Screenshot*.png
+*.log
