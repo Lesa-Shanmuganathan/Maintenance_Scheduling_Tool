@@ -18,13 +18,13 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 
-const MainPage = ({ pendingCount }) => {
+const MainPage = ({ pendingCount, refreshKey = 0, onDataMutated }) => {
   const [environments, setEnvironments] = useState([]);
   const [activeTab, setActiveTab] = useState(0); 
   const [equipments, setEquipments] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery] = useState('');
   const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   
@@ -41,7 +41,6 @@ const MainPage = ({ pendingCount }) => {
   const [overrideEq, setOverrideEq] = useState(null);
   const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
 
-  const handleOpenReport = (event, log) => setSelectedLog(log);
   const handleCloseReport = () => setSelectedLog(null);
 
   const loadEquipments = useCallback(async () => {
@@ -57,7 +56,7 @@ const MainPage = ({ pendingCount }) => {
     try {
       const res = await fetchEnvironments();
       setEnvironments(res.data);
-      loadEquipments();
+      await loadEquipments();
     } catch (err) {
       console.error(err);
     }
@@ -65,7 +64,14 @@ const MainPage = ({ pendingCount }) => {
 
   useEffect(() => {
     loadEnvironments();
-  }, [loadEnvironments]);
+    setCalendarRefreshKey(prev => prev + 1);
+  }, [loadEnvironments, refreshKey]);
+
+  const refreshMaintenanceViews = useCallback(async () => {
+    await loadEnvironments();
+    setCalendarRefreshKey(prev => prev + 1);
+    onDataMutated?.();
+  }, [loadEnvironments, onDataMutated]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -157,9 +163,10 @@ const MainPage = ({ pendingCount }) => {
     return (
       <VerificationTable 
         systems={verificationSystems} 
+        onActionSuccess={refreshMaintenanceViews}
         onComplete={() => {
           setVerificationSystems(null);
-          loadEnvironments();
+          refreshMaintenanceViews();
         }}
       />
     );
@@ -291,7 +298,7 @@ const MainPage = ({ pendingCount }) => {
 
         {isPendingTab ? (
           <div className="flex-1 overflow-y-auto">
-            <PendingReviewPage onCountChange={() => {}} hideWrapper />
+            <PendingReviewPage onCountChange={() => {}} onDataMutated={onDataMutated} hideWrapper />
           </div>
         ) : (
             <TableContainer className="flex-1 overflow-y-auto overflow-x-auto">

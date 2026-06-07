@@ -54,7 +54,7 @@ const ImportDocumentModal = ({ isOpen, onClose, onSuccess }) => {
           setError('Classification failed: ' + data.error);
           setLoading(false);
         }
-      } catch (err) {
+      } catch {
         clearInterval(pollInterval.current);
         setError('Lost connection to server while checking progress.');
         setLoading(false);

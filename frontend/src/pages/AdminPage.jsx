@@ -4,9 +4,13 @@ import {
   fetchAdminEnvironments, createAdminEnvironment, updateAdminEnvironment, deleteAdminEnvironment,
   createAdminLocation, updateAdminLocation, deleteAdminLocation
 } from '../api';
-import { Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button, TextField, IconButton, Select, MenuItem } from '@mui/material';
+import { Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button, TextField, IconButton } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import LogoutIcon from '@mui/icons-material/Logout';
 
 const AdminPage = () => {
   const [environments, setEnvironments] = useState([]);
@@ -22,12 +26,11 @@ const AdminPage = () => {
   const [editingEnvId, setEditingEnvId] = useState(null);
   const [editEnvName, setEditEnvName] = useState('');
   const [editEnvDesc, setEditEnvDesc] = useState('');
-  const [newLocationEnvId, setNewLocationEnvId] = useState('');
-  const [newLocationCode, setNewLocationCode] = useState('');
-  const [newLocationDesc, setNewLocationDesc] = useState('');
+  const [newLocations, setNewLocations] = useState({});
   const [editingLocationId, setEditingLocationId] = useState(null);
   const [editLocationCode, setEditLocationCode] = useState('');
   const [editLocationDesc, setEditLocationDesc] = useState('');
+  const [expandedEnvId, setExpandedEnvId] = useState(null);
 
   const loadEnvironments = async () => {
     try {
@@ -49,12 +52,6 @@ const AdminPage = () => {
       loadEnvironments();
     }
   }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (!newLocationEnvId && environments.length > 0) {
-      setNewLocationEnvId(environments[0].id);
-    }
-  }, [environments, newLocationEnvId]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -104,15 +101,30 @@ const AdminPage = () => {
     }
   };
 
-  const handleAddLocation = async () => {
-    if (!newLocationEnvId || !newLocationCode.trim()) return;
+  const updateNewLocation = (envId, field, value) => {
+    setNewLocations(prev => ({
+      ...prev,
+      [envId]: {
+        code: '',
+        description: '',
+        ...(prev[envId] || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleAddLocation = async (envId) => {
+    const newLocation = newLocations[envId] || {};
+    if (!envId || !newLocation.code?.trim()) return;
     await createAdminLocation({
-      environment_id: newLocationEnvId,
-      code: newLocationCode,
-      description: newLocationDesc
+      environment_id: envId,
+      code: newLocation.code,
+      description: newLocation.description || ''
     });
-    setNewLocationCode('');
-    setNewLocationDesc('');
+    setNewLocations(prev => ({
+      ...prev,
+      [envId]: { code: '', description: '' }
+    }));
     loadEnvironments();
   };
 
@@ -131,8 +143,6 @@ const AdminPage = () => {
       loadEnvironments();
     }
   };
-
-  const locations = environments.flatMap(env => (env.locations || []).map(loc => ({ ...loc, environment_name: env.name })));
 
   if (!isAuthenticated) {
     return (
@@ -163,124 +173,214 @@ const AdminPage = () => {
   }
 
   return (
-    <div className="h-full flex flex-col gap-6 overflow-y-auto">
-      <div className="bg-white p-6 border border-gray-100 shadow-sm shrink-0">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <Typography variant="h5" className="text-[#00A651] font-bold">Manage Environments</Typography>
-          <Button variant="outlined" className="rounded-none border-gray-300! text-gray-700!" onClick={handleLogout}>
+    <div className="h-full min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 bg-white border border-gray-100 shadow-sm flex flex-col">
+        <div className="shrink-0 px-6 py-5 border-b border-gray-100 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <Typography variant="h5" className="text-[#00A651] font-bold">Admin Console</Typography>
+            <Typography variant="body2" className="text-gray-500 mt-1">
+              Manage environments and their assigned locations.
+            </Typography>
+          </div>
+          <Button
+            variant="outlined"
+            startIcon={<LogoutIcon />}
+            className="rounded-none border-gray-300! text-gray-700! normal-case self-start md:self-auto"
+            onClick={handleLogout}
+          >
             Logout
           </Button>
         </div>
-        <TableContainer component={Paper} elevation={0} className="border border-gray-100 rounded-none shadow-sm mb-4">
-          <Table>
+
+        <TableContainer component={Paper} elevation={0} className="flex-1 min-h-0 overflow-auto rounded-none shadow-none">
+          <Table
+            stickyHeader
+            size="small"
+            sx={{
+              minWidth: 980,
+              tableLayout: 'fixed',
+              '& .MuiTableCell-root': {
+                borderColor: '#f1f5f9',
+                verticalAlign: 'middle',
+                py: 1.5,
+              },
+            }}
+          >
             <TableHead className="bg-gray-50/80">
               <TableRow>
-                <TableCell className="font-bold! text-[#64748b]!">NAME</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">DESCRIPTION</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">EQUIPMENT COUNT</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">ACTIONS</TableCell>
+                <TableCell width="22%" className="font-bold! text-[#64748b]! bg-gray-50!">NAME</TableCell>
+                <TableCell width="34%" className="font-bold! text-[#64748b]! bg-gray-50!">DESCRIPTION</TableCell>
+                <TableCell width="10%" align="center" className="font-bold! text-[#64748b]! bg-gray-50!">EQUIPMENT</TableCell>
+                <TableCell width="18%" className="font-bold! text-[#64748b]! bg-gray-50!">LOCATIONS</TableCell>
+                <TableCell width="16%" align="right" className="font-bold! text-[#64748b]! bg-gray-50! pr-6!">ACTIONS</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {environments.map(env => (
-                <TableRow key={env.id} hover>
-                  <TableCell>
-                    {editingEnvId === env.id ? (
-                      <TextField size="small" value={editEnvName} onChange={e => setEditEnvName(e.target.value)} />
-                    ) : env.name}
-                  </TableCell>
-                  <TableCell>
-                    {editingEnvId === env.id ? (
-                      <TextField size="small" fullWidth value={editEnvDesc} onChange={e => setEditEnvDesc(e.target.value)} />
-                    ) : env.description}
-                  </TableCell>
-                  <TableCell>{env.equipment_count}</TableCell>
-                  <TableCell>
-                    {editingEnvId === env.id ? (
-                      <div className="flex gap-2">
-                        <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateEnv(env.id)}>Save</Button>
-                        <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingEnvId(null)}>Cancel</Button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <IconButton size="small" onClick={() => { setEditingEnvId(env.id); setEditEnvName(env.name); setEditEnvDesc(env.description || ''); }}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton size="small" className="text-red-500!" onClick={() => handleDeleteEnv(env)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
+                <React.Fragment key={env.id}>
+                  <TableRow hover className={expandedEnvId === env.id ? 'bg-green-50/20' : 'bg-white'}>
+                    <TableCell>
+                      {editingEnvId === env.id ? (
+                        <TextField size="small" fullWidth value={editEnvName} onChange={e => setEditEnvName(e.target.value)} />
+                      ) : (
+                        <Typography className="font-bold! text-gray-900! truncate" title={env.name}>{env.name}</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editingEnvId === env.id ? (
+                        <TextField size="small" fullWidth value={editEnvDesc} onChange={e => setEditEnvDesc(e.target.value)} />
+                      ) : (
+                        <Typography variant="body2" className="text-gray-600 line-clamp-2" title={env.description || ''}>
+                          {env.description || '-'}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <span className="inline-flex min-w-9 justify-center rounded-sm border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-bold text-gray-700">
+                        {env.equipment_count}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" className="text-gray-600">
+                        {env.locations?.length || 0} location{(env.locations?.length || 0) === 1 ? '' : 's'}
+                      </Typography>
+                      {(env.locations || []).length > 0 && (
+                        <Typography variant="caption" className="block text-gray-400 mt-1 truncate">
+                          {(env.locations || []).slice(0, 4).map(location => location.code).join(', ')}
+                          {(env.locations || []).length > 4 ? ` +${env.locations.length - 4} more` : ''}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="right" className="pr-6!">
+                      {editingEnvId === env.id ? (
+                        <div className="flex gap-2 justify-end">
+                          <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateEnv(env.id)}>Save</Button>
+                          <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingEnvId(null)}>Cancel</Button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 justify-end">
+                          <IconButton size="small" onClick={() => { setEditingEnvId(env.id); setEditEnvName(env.name); setEditEnvDesc(env.description || ''); }}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" className="text-red-500!" onClick={() => handleDeleteEnv(env)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                          <Button
+                            size="small"
+                            variant={expandedEnvId === env.id ? 'contained' : 'outlined'}
+                            endIcon={expandedEnvId === env.id ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
+                            onClick={() => setExpandedEnvId(expandedEnvId === env.id ? null : env.id)}
+                            className={`${expandedEnvId === env.id ? 'bg-[#00A651]! text-white!' : 'border-gray-300! text-gray-700!'} rounded-none normal-case`}
+                          >
+                            Locations
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {expandedEnvId === env.id && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="bg-gray-50/50! p-0!">
+                        <div className="mx-6 my-4 border border-gray-200 bg-white">
+                          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-4">
+                            <Typography variant="subtitle2" className="font-bold! text-gray-800!">Locations for {env.name}</Typography>
+                            <Typography variant="caption" className="text-gray-500">{env.locations?.length || 0} configured</Typography>
+                          </div>
+                          <Table size="small" sx={{ tableLayout: 'fixed' }}>
+                            <TableHead>
+                              <TableRow>
+                                <TableCell width="24%" className="font-bold! text-[#64748b]! bg-gray-50!">LOCATION</TableCell>
+                                <TableCell width="56%" className="font-bold! text-[#64748b]! bg-gray-50!">DESCRIPTION</TableCell>
+                                <TableCell width="20%" align="right" className="font-bold! text-[#64748b]! bg-gray-50! pr-4!">ACTIONS</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {(env.locations || []).map(location => (
+                                <TableRow key={location.id} hover>
+                                  <TableCell>
+                                    {editingLocationId === location.id ? (
+                                      <TextField size="small" fullWidth value={editLocationCode} onChange={e => setEditLocationCode(e.target.value)} />
+                                    ) : (
+                                      <span className="font-bold text-gray-800">{location.code}</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {editingLocationId === location.id ? (
+                                      <TextField size="small" fullWidth value={editLocationDesc} onChange={e => setEditLocationDesc(e.target.value)} />
+                                    ) : (
+                                      <span className="text-sm text-gray-600">{location.description || '-'}</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell align="right" className="pr-4!">
+                                    {editingLocationId === location.id ? (
+                                      <div className="flex gap-2 justify-end">
+                                        <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateLocation(location.id)}>Save</Button>
+                                        <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingLocationId(null)}>Cancel</Button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex gap-1 justify-end">
+                                        <IconButton size="small" onClick={() => { setEditingLocationId(location.id); setEditLocationCode(location.code); setEditLocationDesc(location.description || ''); }}>
+                                          <EditIcon fontSize="small" />
+                                        </IconButton>
+                                        <IconButton size="small" className="text-red-500!" onClick={() => handleDeleteLocation(location)}>
+                                          <DeleteIcon fontSize="small" />
+                                        </IconButton>
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                              {(env.locations || []).length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={3} className="text-gray-500! py-6! text-center!">No locations configured for this environment.</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                          <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-3 items-center px-4 py-3 border-t border-gray-100 bg-gray-50/60">
+                            <TextField
+                              size="small"
+                              label="Location Code"
+                              value={newLocations[env.id]?.code || ''}
+                              onChange={e => updateNewLocation(env.id, 'code', e.target.value)}
+                            />
+                            <TextField
+                              size="small"
+                              label="Description"
+                              value={newLocations[env.id]?.description || ''}
+                              onChange={e => updateNewLocation(env.id, 'description', e.target.value)}
+                            />
+                            <Button
+                              variant="contained"
+                              startIcon={<AddIcon />}
+                              className="bg-black! text-white! rounded-none normal-case h-10"
+                              onClick={() => handleAddLocation(env.id)}
+                            >
+                              Add Location
+                            </Button>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
-        <div className="flex gap-4 items-center">
-          <TextField size="small" label="New Environment Name" value={newEnvName} onChange={e => setNewEnvName(e.target.value)} />
-          <TextField size="small" label="Description" className="flex-1" value={newEnvDesc} onChange={e => setNewEnvDesc(e.target.value)} />
-          <Button variant="contained" className="bg-black! text-white! rounded-none" onClick={handleAddEnv}>Add Environment</Button>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 border border-gray-100 shadow-sm shrink-0">
-        <Typography variant="h5" className="text-[#00A651] font-bold mb-4">Manage Locations</Typography>
-        <TableContainer component={Paper} elevation={0} className="border border-gray-100 rounded-none shadow-sm mb-4">
-          <Table>
-            <TableHead className="bg-gray-50/80">
-              <TableRow>
-                <TableCell className="font-bold! text-[#64748b]!">LOCATION</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">ENVIRONMENT</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">DESCRIPTION</TableCell>
-                <TableCell className="font-bold! text-[#64748b]!">ACTIONS</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {locations.map(location => (
-                <TableRow key={location.id} hover>
-                  <TableCell>
-                    {editingLocationId === location.id ? (
-                      <TextField size="small" value={editLocationCode} onChange={e => setEditLocationCode(e.target.value)} />
-                    ) : location.code}
-                  </TableCell>
-                  <TableCell>{location.environment_name}</TableCell>
-                  <TableCell>
-                    {editingLocationId === location.id ? (
-                      <TextField size="small" fullWidth value={editLocationDesc} onChange={e => setEditLocationDesc(e.target.value)} />
-                    ) : location.description || '-'}
-                  </TableCell>
-                  <TableCell>
-                    {editingLocationId === location.id ? (
-                      <div className="flex gap-2">
-                        <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateLocation(location.id)}>Save</Button>
-                        <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingLocationId(null)}>Cancel</Button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <IconButton size="small" onClick={() => { setEditingLocationId(location.id); setEditLocationCode(location.code); setEditLocationDesc(location.description || ''); }}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton size="small" className="text-red-500!" onClick={() => handleDeleteLocation(location)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <div className="grid grid-cols-1 md:grid-cols-[220px_180px_1fr_auto] gap-4 items-center">
-          <Select size="small" value={newLocationEnvId} onChange={e => setNewLocationEnvId(e.target.value)}>
-            {environments.map(env => (
-              <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
-            ))}
-          </Select>
-          <TextField size="small" label="Location Code" value={newLocationCode} onChange={e => setNewLocationCode(e.target.value)} />
-          <TextField size="small" label="Description" value={newLocationDesc} onChange={e => setNewLocationDesc(e.target.value)} />
-          <Button variant="contained" className="bg-black! text-white! rounded-none" onClick={handleAddLocation}>Add Location</Button>
+        <div className="shrink-0 border-t border-gray-100 bg-gray-50/70 px-6 py-4">
+          <div className="grid grid-cols-1 md:grid-cols-[240px_1fr_auto] gap-3 items-center">
+            <TextField size="small" label="New Environment Name" value={newEnvName} onChange={e => setNewEnvName(e.target.value)} />
+            <TextField size="small" label="Description" value={newEnvDesc} onChange={e => setNewEnvDesc(e.target.value)} />
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              className="bg-black! text-white! rounded-none normal-case h-10"
+              onClick={handleAddEnv}
+            >
+              Add Environment
+            </Button>
+          </div>
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import VerificationTable from '../components/VerificationTable';
 import { fetchPendingReview } from '../api';
 
-const PendingReviewPage = ({ onCountChange }) => {
+const PendingReviewPage = ({ onCountChange, onDataMutated }) => {
   const [pendingItems, setPendingItems] = useState([]);
 
   const loadPendingItems = useCallback(async () => {
@@ -25,7 +25,10 @@ const PendingReviewPage = ({ onCountChange }) => {
     <VerificationTable 
       systems={pendingItems} 
       isPendingTab={true}
-      onActionSuccess={loadPendingItems}
+      onActionSuccess={() => {
+        loadPendingItems();
+        onDataMutated?.();
+      }}
     />
   );
 };

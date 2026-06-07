@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { AppBar, Toolbar, Typography, Container, IconButton } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -89,15 +89,15 @@ const Navigation = () => {
   );
 };
 
-const MainContent = ({ pendingCount, onPendingCountChange }) => {
+const MainContent = ({ pendingCount, onPendingCountChange, refreshKey, onDataMutated }) => {
   const location = useLocation();
   
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <Routes location={location}>
-        <Route path="/" element={<SynthesisDashboard />} />
-        <Route path="/environments" element={<MainPage pendingCount={pendingCount} />} />
-        <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} />} />
+        <Route path="/" element={<SynthesisDashboard refreshKey={refreshKey} />} />
+        <Route path="/environments" element={<MainPage pendingCount={pendingCount} refreshKey={refreshKey} onDataMutated={onDataMutated} />} />
+        <Route path="/pending" element={<PendingReviewPage onCountChange={onPendingCountChange} onDataMutated={onDataMutated} />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
@@ -107,18 +107,25 @@ const MainContent = ({ pendingCount, onPendingCountChange }) => {
 
 function App() {
   const [pendingCount, setPendingCount] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const loadPendingCount = useCallback(async () => {
+    try {
+      const res = await fetchPendingReview();
+      setPendingCount(res.data.length);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const handleDataMutated = useCallback(() => {
+    setRefreshKey(prev => prev + 1);
+    loadPendingCount();
+  }, [loadPendingCount]);
 
   useEffect(() => {
-    const getInitialCount = async () => {
-      try {
-        const res = await fetchPendingReview();
-        setPendingCount(res.data.length);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    getInitialCount();
-  }, []);
+    loadPendingCount();
+  }, [loadPendingCount]);
 
   return (
     <Router>
@@ -126,7 +133,12 @@ function App() {
         <Header />
         <Navigation />
         <Container maxWidth="xl" className="grow flex flex-col py-8 overflow-hidden">
-          <MainContent pendingCount={pendingCount} onPendingCountChange={setPendingCount} />
+          <MainContent
+            pendingCount={pendingCount}
+            onPendingCountChange={setPendingCount}
+            refreshKey={refreshKey}
+            onDataMutated={handleDataMutated}
+          />
         </Container>
       </div>
     </Router>

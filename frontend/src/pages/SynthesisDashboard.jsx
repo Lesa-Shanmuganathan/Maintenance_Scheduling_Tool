@@ -13,7 +13,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TodayIcon from '@mui/icons-material/Today';
 import SearchIcon from '@mui/icons-material/Search';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-const SynthesisDashboard = () => {
+const SynthesisDashboard = ({ refreshKey = 0 }) => {
   const currentDate = new Date();
   const defaultMonth = currentDate.getMonth() + 1;
   const defaultYear = currentDate.getFullYear();
@@ -59,11 +59,11 @@ const SynthesisDashboard = () => {
 
   useEffect(() => {
     loadEnvironments();
-  }, [loadEnvironments]);
+  }, [loadEnvironments, refreshKey]);
 
   useEffect(() => {
     loadSynthesis();
-  }, [loadSynthesis]);
+  }, [loadSynthesis, refreshKey]);
 
   const handleOpenCompleteModal = (task) => {
     setCompletingTask(task);
@@ -319,7 +319,7 @@ const SynthesisDashboard = () => {
       </div>
 
       <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA]">
-        <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} compact />
+        <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} refreshKey={refreshKey} compact />
       </div>
 
       <Dialog 
