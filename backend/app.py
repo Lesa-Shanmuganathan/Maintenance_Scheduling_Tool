@@ -581,68 +581,129 @@ RULES:
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Each entry: (compiled_regex, (freq_type, freq_days, freq_months, freq_years, label))
+# IMPORTANT: N-unit patterns (e.g. "9 monthly", "3 monthly") must come BEFORE the plain
+# unit patterns so they match first.
 PERIOD_REGEX_MAP = [
-    (re.compile(r'\bdaily\b|\bevery\s+day\b', re.I),
-     ('Daily',  0, 0, 0, 'Daily')),
-    (re.compile(r'\bweekly\b|\bevery\s+week\b', re.I),
-     ('Weekly', 0, 0, 0, 'Weekly')),
-    (re.compile(r'\bmonthly\b|\bevery\s+month\b', re.I),
-     ('Monthly', 0, 0, 0, 'Monthly')),
+    # ── N-unit compound forms: "9 monthly", "3-monthly", "9 month", "every 9 months" ──
+    (re.compile(r'(?<![\w])(\d+)\s*[\-]?\s*(month(?:ly)?|week(?:ly)?|day(?:s)?|year(?:ly)?)(?:[\s,]|$)', re.I),
+     None),   # sentinel — handled dynamically in the functions below
+    # ── Specific named intervals ──
     (re.compile(r'\b(quarterly|3[\s\-]+month(?:ly)?|every\s+3\s+months?)\b', re.I),
      ('Custom', 0, 3, 0, '3-Monthly')),
     (re.compile(r'\b(half[\s\-]+year(?:ly)?|6[\s\-]+month(?:ly)?|semi[\s\-]+annual|bi[\s\-]+annual|every\s+6\s+months?)\b', re.I),
      ('Custom', 0, 6, 0, 'Half-Yearly')),
     (re.compile(r'\b(annual(?:ly)?|year(?:ly)?|once\s+a\s+year|per\s+year|p\.a\.|p/a)\b', re.I),
      ('Yearly', 0, 0, 0, 'Annual')),
+    (re.compile(r'\bdaily\b|\bevery\s+day\b', re.I),
+     ('Daily',  0, 0, 0, 'Daily')),
+    (re.compile(r'\bweekly\b|\bevery\s+week\b', re.I),
+     ('Weekly', 0, 0, 0, 'Weekly')),
+    (re.compile(r'\bmonthly\b|\bevery\s+month\b', re.I),
+     ('Monthly', 0, 0, 0, 'Monthly')),
 ]
+
+def _parse_n_unit(text: str):
+    """Try to parse 'N monthly/weekly/daily/yearly' or 'N months/weeks/days/years'.
+    Returns (freq_type, freq_days, freq_months, freq_years, label) or None.
+    Uses (?<![\\w.]) to prevent matching section numbers like '5.2.2 Monthly'."""
+    m = re.search(
+        r'(?<![\w.])(\d+)\s*[\-]?\s*(month(?:ly)?|week(?:ly)?|day(?:s)?|year(?:ly)?)',
+        text, re.I
+    )
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2).lower()
+    if unit.startswith('month'):
+        if n == 1: return ('Monthly', 0, 1, 0, '1 Month')
+        if n == 6: return ('Custom', 0, 6, 0, '6 Months')
+        if n == 12: return ('Yearly', 0, 0, 1, '12 Months')
+        return ('Custom', 0, n, 0, f'{n} Months')
+    elif unit.startswith('week'):
+        if n == 1: return ('Weekly', 0, 0, 0, '1 Week')
+        return ('Custom', n * 7, 0, 0, f'{n} Weeks')
+    elif unit.startswith('day'):
+        if n == 1: return ('Daily', 1, 0, 0, '1 Day')
+        return ('Custom', n, 0, 0, f'{n} Days')
+    elif unit.startswith('year'):
+        if n == 1: return ('Yearly', 0, 0, 1, '1 Year')
+        return ('Custom', 0, 0, n, f'{n} Years')
+    return None
+
+def _is_standalone_period(cell_text: str) -> bool:
+    """Return True only if the cell looks like a DEDICATED interval cell, not a description
+    that incidentally mentions a period (e.g. 'checked once a year by an approved company').
+    Rules:
+      - Cell must be <= 50 chars (dedicated interval cells are short labels).
+      - detect_period_in_text must return a result.
+      - The period keyword must occupy >= 40% of the cell length (it IS the cell, not embedded).
+    """
+    text = cell_text.strip()
+    if not text or len(text) > 50:
+        return False
+    p = detect_period_in_text(text)
+    if not p:
+        return False
+    # Check the period token ratio: find the matched span length
+    m = re.search(
+        r'(?<![\w.])(\d+\s*[\-]?\s*)?(month(?:ly)?|week(?:ly)?|day(?:s)?|year(?:ly)?|'
+        r'daily|weekly|monthly|quarterly|annual(?:ly)?|half[\s\-]+year(?:ly)?|bi[\-\s]?annual)',
+        text, re.I
+    )
+    if m and len(m.group(0)) / len(text) >= 0.35:
+        return True
+    return False
+
+
+# N-unit pattern used for position-finding (mirrors _parse_n_unit regex)
+_N_UNIT_PAT = re.compile(
+    r'(?<![\w.])(\d+)\s*[-]?\s*(month(?:ly)?|week(?:ly)?|day(?:s)?|year(?:ly)?)',
+    re.I
+)
+
+def _find_earliest_period(text: str):
+    """Scan all period patterns and return the result whose keyword appears EARLIEST
+    in the text. This prevents a later incidental mention (e.g. 'once a year' in a
+    description) from overriding an earlier heading-level keyword (e.g. 'Daily').
+
+    Returns (freq_type, freq_days, freq_months, freq_years, label) or None.
+    """
+    if not text:
+        return None
+
+    INF = len(text) + 1
+    best_pos, best_result = INF, None
+
+    # N-unit patterns: "9 monthly", "3 months", etc.
+    m = _N_UNIT_PAT.search(text)
+    if m:
+        r = _parse_n_unit(text)
+        if r:
+            best_pos, best_result = m.start(), r
+
+    # Named patterns — find the one with the earliest match START position
+    for pattern, result in PERIOD_REGEX_MAP:
+        if result is None:      # sentinel (N-unit handled above)
+            continue
+        m = pattern.search(text)
+        if m and m.start() < best_pos:
+            best_pos, best_result = m.start(), result
+
+    return best_result
 
 def normalize_frequency(text: str):
     """Map a free-text maintenance period to (freq_type, freq_days, freq_months, freq_years, label)."""
     if not text:
         return ('Yearly', 0, 0, 0, 'Annual')
-    for pattern, result in PERIOD_REGEX_MAP:
-        if pattern.search(text):
-            return result
-
-    # ── Generic N-unit fallback (catches "9 months", "2 weeks", "45 days", "2 years", etc.) ──
-    m = re.search(r'(\d+)\s*[\-]?\s*(month|week|day|year)s?', text, re.I)
-    if m:
-        n = int(m.group(1))
-        unit = m.group(2).lower()
-        if unit == 'month':
-            return ('Custom', 0, n, 0, f'{n}-Monthly')
-        elif unit == 'week':
-            return ('Custom', n * 7, 0, 0, f'{n}-Weekly')
-        elif unit == 'day':
-            return ('Custom', n, 0, 0, f'{n}-Daily')
-        elif unit == 'year':
-            return ('Custom', 0, 0, n, f'{n}-Yearly')
-
-    return ('Yearly', 0, 0, 0, str(text).strip() or 'Annual')
+    result = _find_earliest_period(text)
+    return result or ('Yearly', 0, 0, 0, str(text).strip() or 'Annual')
 
 def detect_period_in_text(text: str):
-    """Return period tuple if a period keyword is found in text, else None."""
-    if not text:
-        return None
-    for pattern, result in PERIOD_REGEX_MAP:
-        if pattern.search(text):
-            return result
+    """Return period tuple if a period keyword is found in text, else None.
+    Returns the period whose keyword appears EARLIEST in the text (not pattern priority).
+    """
+    return _find_earliest_period(text)
 
-    # ── Generic N-unit fallback ──
-    m = re.search(r'(\d+)\s*[\-]?\s*(month|week|day|year)s?', text, re.I)
-    if m:
-        n = int(m.group(1))
-        unit = m.group(2).lower()
-        if unit == 'month':
-            return ('Custom', 0, n, 0, f'{n}-Monthly')
-        elif unit == 'week':
-            return ('Custom', n * 7, 0, 0, f'{n}-Weekly')
-        elif unit == 'day':
-            return ('Custom', n, 0, 0, f'{n}-Daily')
-        elif unit == 'year':
-            return ('Custom', 0, 0, n, f'{n}-Yearly')
-
-    return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TABLE-EXTRACTED NAME QUALITY SCORING
@@ -1140,60 +1201,130 @@ def extract_schedule_from_pdf(file_bytes: bytes):
                                     })
 
                     else:
-                        # ── Layout B: infer period from page section heading ──
-                        pp = detect_period_in_text(pg_text)
-                        data_start_idx = 1
-                        
-                        if pp:
-                            last_seen_period = pp
-                            name_col_explicit = False
-                            name_col = 0
-                            for ci, h in enumerate(headers):
-                                if any(kw in h.lower() for kw in header_kws):
-                                    name_col = ci
-                                    name_col_explicit = True
-                                    break
-                            last_seen_name_col = name_col
-                            last_seen_name_col_explicit = name_col_explicit
-                        else:
-                            if last_seen_period:
-                                pp = last_seen_period
-                                name_col = last_seen_name_col
-                                name_col_explicit = last_seen_name_col_explicit
-                                
-                                h_val = headers[name_col].lower() if name_col < len(headers) else ''
-                                if not any(kw in h_val for kw in header_kws):
-                                    data_start_idx = 0
+                        # ── Layout B/C: no period keywords in column headers ──
+                        # First try Layout C: scan each data row's cells for an inline period
+                        # (handles tables like "Medium | 9 monthly | Workshop" where each
+                        # row has its own interval in a non-header cell).
+                        row_has_inline_period = False
+                        layout_c_results = []
+                        name_col_c = 0
+                        for ci, h in enumerate(headers):
+                            if any(kw in h.lower() for kw in header_kws):
+                                name_col_c = ci
+                                break
+
+                        for row in rows[1:]:
+                            # Find the first cell in this row that contains a period value
+                            row_period = None
+                            period_col_idx = None
+                            for ci, cell in enumerate(row):
+                                if ci == name_col_c:
+                                    continue
+                                if _is_standalone_period(cell):
+                                    p = detect_period_in_text(cell)
+                                    if p:
+                                        row_period = p
+                                        period_col_idx = ci
+                                        break
+
+                            if row_period:
+                                row_has_inline_period = True
+                                raw_name = row[name_col_c] if name_col_c < len(row) else ''
+                                if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
+                                    # Name may be in a different column; use first non-period non-empty cell
+                                    for ci, cell in enumerate(row):
+                                        if ci != period_col_idx and cell and cell.lower() not in ('', 'none', 'nan'):
+                                            raw_name = cell
+                                            break
+                                if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
+                                    continue
+
+                                # Description: first non-name, non-period cell
+                                desc = ''
+                                for ci, cell in enumerate(row):
+                                    if ci != name_col_c and ci != period_col_idx and cell:
+                                        desc = cell
+                                        break
+
+                                final_name = resolve_system_name(raw_name, parent_system, False)
+                                ft, fd, fm, fy, fl = row_period
+                                layout_c_results.append({
+                                    'name': final_name,
+                                    'description': desc,
+                                    'freq_type': ft,
+                                    'freq_days': fd,
+                                    'freq_months': fm,
+                                    'freq_years': fy,
+                                    'freq_label': fl,
+                                    'commissioning_date': None,
+                                    'source': 'pdf_layout_c',
+                                    'confidence': _score_extracted_name(final_name, desc)
+                                })
+
+                        if row_has_inline_period and layout_c_results:
+                            # Only use Layout C if a meaningful fraction of rows had
+                            # standalone period cells (not just one incidental mention).
+                            data_row_count = max(len(rows) - 1, 1)
+                            if len(layout_c_results) / data_row_count >= 0.30:
+                                extracted.extend(layout_c_results)
+                                row_has_inline_period = True  # keep flag
                             else:
-                                continue  
+                                row_has_inline_period = False  # treat as Layout B
+                        else:
+                            # ── Layout B fallback: use page-level period ──
+                            pp = detect_period_in_text(pg_text)
+                            data_start_idx = 1
 
-                        ft, fd, fm, fy, fl = pp
+                            if pp:
+                                last_seen_period = pp
+                                name_col_explicit = False
+                                name_col = 0
+                                for ci, h in enumerate(headers):
+                                    if any(kw in h.lower() for kw in header_kws):
+                                        name_col = ci
+                                        name_col_explicit = True
+                                        break
+                                last_seen_name_col = name_col
+                                last_seen_name_col_explicit = name_col_explicit
+                            else:
+                                if last_seen_period:
+                                    pp = last_seen_period
+                                    name_col = last_seen_name_col
+                                    name_col_explicit = last_seen_name_col_explicit
 
-                        for row in rows[data_start_idx:]:
-                            raw_name = row[name_col] if name_col < len(row) else ''
-                            if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
-                                continue
-                                
-                            desc = ''
-                            for ci in range(len(row)):
-                                if ci != name_col and row[ci]:
-                                    desc = row[ci]
-                                    break
+                                    h_val = headers[name_col].lower() if name_col < len(headers) else ''
+                                    if not any(kw in h_val for kw in header_kws):
+                                        data_start_idx = 0
+                                else:
+                                    continue
 
-                            final_name = resolve_system_name(raw_name, parent_system, name_col_explicit)
+                            ft, fd, fm, fy, fl = pp
 
-                            extracted.append({
-                                'name': final_name,
-                                'description': desc,
-                                'freq_type': ft,
-                                'freq_days': fd,
-                                'freq_months': fm,
-                                'freq_years': fy,
-                                'freq_label': fl,
-                                'commissioning_date': None,
-                                'source': 'pdf_layout_b',
-                                'confidence': _score_extracted_name(final_name, desc)
-                            })
+                            for row in rows[data_start_idx:]:
+                                raw_name = row[name_col] if name_col < len(row) else ''
+                                if not raw_name or raw_name.lower() in ('', 'none', 'nan'):
+                                    continue
+
+                                desc = ''
+                                for ci in range(len(row)):
+                                    if ci != name_col and row[ci]:
+                                        desc = row[ci]
+                                        break
+
+                                final_name = resolve_system_name(raw_name, parent_system, name_col_explicit)
+
+                                extracted.append({
+                                    'name': final_name,
+                                    'description': desc,
+                                    'freq_type': ft,
+                                    'freq_days': fd,
+                                    'freq_months': fm,
+                                    'freq_years': fy,
+                                    'freq_label': fl,
+                                    'commissioning_date': None,
+                                    'source': 'pdf_layout_b',
+                                    'confidence': _score_extracted_name(final_name, desc)
+                                })
 
     except Exception as exc:
         import traceback
@@ -1298,40 +1429,99 @@ def extract_schedule_from_docx(file_bytes: bytes):
                             })
 
             elif current_period:
-                ft, fd, fm, fy, fl = current_period
-                
-                name_col_explicit = False
-                name_col = 0
+                # ── Layout C: try scanning each row's cells for an inline period first ──
+                name_col_c = 0
                 for ci, h in enumerate(headers):
                     if any(kw in h.lower() for kw in header_kws):
-                        name_col = ci
-                        name_col_explicit = True
+                        name_col_c = ci
                         break
 
+                row_has_inline = False
+                layout_c_results = []
                 for row in rows[1:]:
-                    raw_name = row[name_col] if name_col < len(row) else ''
-                    if not raw_name:
-                        continue
-                    desc = ''
-                    for ci in range(len(row)):
-                        if ci != name_col and row[ci]:
-                            desc = row[ci]
+                    row_period = None
+                    period_col_idx = None
+                    for ci, cell in enumerate(row):
+                        if ci == name_col_c:
+                            continue
+                        if _is_standalone_period(cell):
+                            p = detect_period_in_text(cell)
+                            if p:
+                                row_period = p
+                                period_col_idx = ci
+                                break
+
+                    if row_period:
+                        row_has_inline = True
+                        raw_name = row[name_col_c] if name_col_c < len(row) else ''
+                        if not raw_name:
+                            for ci, cell in enumerate(row):
+                                if ci != period_col_idx and cell:
+                                    raw_name = cell
+                                    break
+                        if not raw_name:
+                            continue
+                        desc = ''
+                        for ci, cell in enumerate(row):
+                            if ci != name_col_c and ci != period_col_idx and cell:
+                                desc = cell
+                                break
+                        final_name = resolve_system_name(raw_name, current_heading, False)
+                        ft, fd, fm, fy, fl = row_period
+                        layout_c_results.append({
+                            'name': final_name,
+                            'description': desc,
+                            'freq_type': ft,
+                            'freq_days': fd,
+                            'freq_months': fm,
+                            'freq_years': fy,
+                            'freq_label': fl,
+                            'commissioning_date': None,
+                            'source': 'docx_layout_c',
+                            'confidence': _score_extracted_name(final_name, desc)
+                        })
+
+                if row_has_inline and layout_c_results:
+                    data_row_count = max(len(rows) - 1, 1)
+                    if len(layout_c_results) / data_row_count >= 0.30:
+                        extracted.extend(layout_c_results)
+                    else:
+                        row_has_inline = False  # fall through to Layout B
+                else:
+                    # ── Layout B fallback: use current_period for all rows ──
+                    ft, fd, fm, fy, fl = current_period
+                    name_col_explicit = False
+                    name_col = 0
+                    for ci, h in enumerate(headers):
+                        if any(kw in h.lower() for kw in header_kws):
+                            name_col = ci
+                            name_col_explicit = True
                             break
-                            
-                    final_name = resolve_system_name(raw_name, current_heading, name_col_explicit)
-                            
-                    extracted.append({
-                        'name': final_name,
-                        'description': desc,
-                        'freq_type': ft,
-                        'freq_days': fd,
-                        'freq_months': fm,
-                        'freq_years': fy,
-                        'freq_label': fl,
-                        'commissioning_date': None,
-                        'source': 'docx_layout_b',
-                        'confidence': _score_extracted_name(final_name, desc)
-                    })
+
+                    for row in rows[1:]:
+                        raw_name = row[name_col] if name_col < len(row) else ''
+                        if not raw_name:
+                            continue
+                        desc = ''
+                        for ci in range(len(row)):
+                            if ci != name_col and row[ci]:
+                                desc = row[ci]
+                                break
+
+                        final_name = resolve_system_name(raw_name, current_heading, name_col_explicit)
+
+                        extracted.append({
+                            'name': final_name,
+                            'description': desc,
+                            'freq_type': ft,
+                            'freq_days': fd,
+                            'freq_months': fm,
+                            'freq_years': fy,
+                            'freq_label': fl,
+                            'commissioning_date': None,
+                            'source': 'docx_layout_b',
+                            'confidence': _score_extracted_name(final_name, desc)
+                        })
 
     return extracted, full_text
 
@@ -1645,7 +1835,10 @@ def classify_document():
         traceback.print_exc()
         return jsonify({"error": f"Failed to process document. Details: {str(e)}"}), 500
 
-ENV_MAP = {"Test Bed": 1, "Chassis Dyno": 2, "Common Facilities": 3}
+def get_env_map():
+    """Build a name->id map from the current environments in the database."""
+    envs = Environment.query.all()
+    return {e.name: e.id for e in envs}
 
 @app.route('/api/verify-classification', methods=['POST'])
 def verify_classification():
@@ -1676,7 +1869,8 @@ def verify_classification():
             comm_date = date.today()
 
         if action == 'accept':
-            env_id = ENV_MAP.get(system.get('environment'), 3)
+            env_map = get_env_map()
+            env_id = env_map.get(system.get('environment'), next(iter(env_map.values()), 1))
             new_eq = Equipment(
                 name=system.get('name', 'Unknown'),
                 description=system.get('description', ''),
@@ -1690,7 +1884,8 @@ def verify_classification():
                 classification_status='accepted',
                 ai_confidence=system.get('classification_confidence', system.get('confidence')),
                 ai_reason=system.get('reason'),
-                ai_predicted_env=system.get('environment')
+                ai_predicted_env=system.get('environment'),
+                location=system.get('location') or None
             )
             db.session.add(new_eq)
             log = CorrectionLog(
@@ -1706,7 +1901,16 @@ def verify_classification():
             
         elif action == 'edit':
             corrected_env = data.get('corrected_environment') or system.get('environment')
-            env_id = ENV_MAP.get(corrected_env, 3)
+            env_map = get_env_map()
+            env_id = env_map.get(corrected_env, next(iter(env_map.values()), 1))
+            corrected_location = data.get('corrected_location') or None
+
+            # Allow reviewer to override frequency during the edit step
+            if 'corrected_freq_type' in data and data['corrected_freq_type']:
+                freq_type = data['corrected_freq_type']
+                freq_days = int(data.get('corrected_freq_days', 0) or 0)
+                freq_months = int(data.get('corrected_freq_months', 0) or 0)
+                freq_years = int(data.get('corrected_freq_years', 0) or 0)
 
             # Allow reviewer to supply a commissioning date during the edit step
             corrected_date_str = data.get('corrected_commissioning_date')
@@ -1729,7 +1933,8 @@ def verify_classification():
                 classification_status='accepted',
                 ai_confidence=system.get('confidence'),
                 ai_reason=system.get('reason'),
-                ai_predicted_env=system.get('environment')
+                ai_predicted_env=system.get('environment'),
+                location=corrected_location
             )
             db.session.add(new_eq)
             log = CorrectionLog(

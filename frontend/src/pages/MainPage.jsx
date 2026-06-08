@@ -163,6 +163,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
     return (
       <VerificationTable 
         systems={verificationSystems} 
+        environments={environments}
         onActionSuccess={refreshMaintenanceViews}
         onComplete={() => {
           setVerificationSystems(null);
