@@ -94,7 +94,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
   const selectedDayEvents = selectedDay ? getEventsForDay(selectedDay) : [];
 
   return (
-    <div className={`bg-[#FAFAFA] border-l border-gray-200 h-full flex flex-col min-h-0 ${compact ? 'p-2' : 'p-3'}`}>
+    <div className={`bg-[#FAFAFA] border-l border-gray-200 h-full flex flex-col min-h-0 min-w-0 ${compact ? 'p-2' : 'p-3'}`}>
       <div className={`flex flex-wrap justify-between items-center gap-1.5 shrink-0 ${compact ? 'mb-1.5' : 'mb-2'}`}>
         <Typography variant={compact ? 'body2' : 'subtitle1'} className="font-bold text-gray-800">
           {format(currentDate, view === 'month' ? 'MMMM yyyy' : 'yyyy')}
@@ -118,7 +118,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
             <div className="min-w-0">
               <div className="text-[11px] font-bold text-[#C0392B]">Overdue maintenance</div>
               <div className="text-[10px] text-red-700 truncate">
-                Oldest: {overdueEquipments[0].name} ({format(parseISO(overdueEquipments[0].next_maintenance_date), 'dd MMM yyyy')})
+                Oldest: {overdueEquipments[0].name} ({format(parseISO(overdueEquipments[0].next_maintenance_date), 'dd/MM/yyyy')})
               </div>
             </div>
             <Chip
@@ -180,7 +180,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
           >
             <div className="w-[280px] max-w-[80vw] p-3">
               <div className="text-sm font-bold text-gray-900 mb-2">
-                {selectedDay ? format(selectedDay, 'dd MMM yyyy') : ''}
+                {selectedDay ? format(selectedDay, 'dd/MM/yyyy') : ''}
               </div>
               <div className="flex flex-col gap-1.5 max-h-[260px] overflow-y-auto pr-1">
                 {selectedDayEvents.map((ev, i) => (
@@ -211,7 +211,7 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
                   <div key={eq.id} className="border-b border-gray-100 pb-2 last:border-0 last:pb-0">
                     <div className="text-xs font-bold text-gray-900 truncate" title={eq.name}>{eq.name}</div>
                     <div className="text-[11px] text-gray-500">
-                      Due {format(parseISO(eq.next_maintenance_date), 'dd MMM yyyy')}
+                      Due {format(parseISO(eq.next_maintenance_date), 'dd/MM/yyyy')}
                     </div>
                   </div>
                 ))}

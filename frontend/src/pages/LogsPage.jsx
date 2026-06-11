@@ -83,7 +83,7 @@ const LogsPage = () => {
               <TableRow key={log.id} hover>
                 <TableCell className="font-bold! text-gray-900!">{log.equipment_name}</TableCell>
                 <TableCell>{log.environment_name}</TableCell>
-                <TableCell>{format(new Date(log.completion_date), 'dd MMM yyyy')}</TableCell>
+                <TableCell>{format(new Date(log.completion_date), 'dd/MM/yyyy')}</TableCell>
                 <TableCell>{log.person || '-'}</TableCell>
                 <TableCell className="truncate max-w-[200px]">{log.description || '-'}</TableCell>
                 <TableCell>

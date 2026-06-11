@@ -9,12 +9,13 @@ import { format } from 'date-fns';
 import { 
   Typography, Button, Tabs, Tab, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, IconButton, Chip, Tooltip,
-  Dialog, TextField, TableSortLabel, Popover,
+  Dialog, DialogTitle, DialogContent, TextField, TableSortLabel, Popover,
   FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import FileCopyIcon from '@mui/icons-material/FileCopy';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 
@@ -39,6 +40,9 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
   const [popoverAnchor, setPopoverAnchor] = useState(null);
   const [overrideDate, setOverrideDate] = useState('');
   const [overrideEq, setOverrideEq] = useState(null);
+  const [duplicateEquipment, setDuplicateEquipment] = useState(null);
+  const [duplicateEnvironmentId, setDuplicateEnvironmentId] = useState('');
+  const [duplicateLocation, setDuplicateLocation] = useState('');
   const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
 
   const handleCloseReport = () => setSelectedLog(null);
@@ -133,6 +137,50 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
     }
   };
 
+  const duplicateLocationOptions = environments.find(env => env.id === duplicateEnvironmentId)?.locations || [];
+
+  const openDuplicateDialog = (eq) => {
+    setDuplicateEquipment(eq);
+    setDuplicateEnvironmentId(eq.environment_id || environments[0]?.id || '');
+    setDuplicateLocation(eq.location || '');
+  };
+
+  const handleDuplicateEnvironmentChange = (value) => {
+    setDuplicateEnvironmentId(value);
+    const env = environments.find(env => env.id === value);
+    setDuplicateLocation(env?.locations?.[0]?.code || '');
+  };
+
+  const handleDuplicateConfirm = async () => {
+    if (!duplicateEquipment || !duplicateEnvironmentId) return;
+
+    const payload = {
+      name: duplicateEquipment.name,
+      serial_number: duplicateEquipment.serial_number,
+      description: duplicateEquipment.description,
+      location: duplicateLocation || duplicateEquipment.location || '',
+      environment_id: duplicateEnvironmentId,
+      commissioning_date: duplicateEquipment.commissioning_date,
+      freq_type: duplicateEquipment.freq_type,
+      freq_years: duplicateEquipment.freq_years,
+      freq_months: duplicateEquipment.freq_months,
+      freq_days: duplicateEquipment.freq_days,
+      next_maintenance_date: duplicateEquipment.next_maintenance_date,
+      standby: duplicateEquipment.standby,
+    };
+
+    try {
+      await addEquipment(payload);
+      await loadEquipments();
+      setCalendarRefreshKey(prev => prev + 1);
+      setDuplicateEquipment(null);
+      setDuplicateEnvironmentId('');
+      setDuplicateLocation('');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const formatFrequency = (eq) => {
     if (eq.freq_type !== 'Custom') return eq.freq_type;
     const parts = [];
@@ -156,7 +204,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
     else if (diffDays <= 7) colorClass = 'text-[#E67E22] font-bold';
     else if (diffDays <= 30) colorClass = 'text-blue-600 font-bold';
 
-    return <span className={colorClass}>{format(due, 'dd MMM yyyy')}</span>;
+    return <span className={colorClass}>{format(due, 'dd/MM/yyyy')}</span>;
   };
 
   if (verificationSystems) {
@@ -193,8 +241,8 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
   };
 
   return (
-    <div className="h-full flex overflow-hidden">
-      <div className={`${isPendingTab ? 'flex-1' : 'flex-[6.5]'} flex flex-col h-full bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]`}>
+    <div className="h-full flex overflow-hidden min-h-0">
+      <div className="flex-[6.5] flex flex-col h-full min-h-0 overflow-hidden bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
         <div className="shrink-0 pt-4 px-6 border-b border-gray-100 flex flex-col gap-4">
           <Tabs 
             value={activeTab} 
@@ -298,10 +346,11 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
             <PendingReviewPage onCountChange={() => {}} onDataMutated={onDataMutated} hideWrapper />
           </div>
         ) : (
-            <TableContainer className="flex-1 overflow-y-auto overflow-x-auto">
+            <TableContainer className="flex-1 min-h-0 overflow-hidden overflow-y-auto overflow-x-auto">
               <Table stickyHeader size="small" sx={{ tableLayout: 'auto' }}>
                 <TableHead>
                   <TableRow className="bg-gray-50 border-b border-gray-200">
+                    <TableCell className="font-bold! text-gray-600! whitespace-nowrap">S.NO</TableCell>
                     <TableCell className="font-bold! text-gray-600! whitespace-nowrap">
                       <TableSortLabel
                         active={sortField === 'name'}
@@ -355,22 +404,28 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                       if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
                       return 0;
                     })
-                    .map((eq) => (
+                    .map((eq, rowIndex) => (
                     <TableRow key={eq.id} hover>
+                      <TableCell>{rowIndex + 1}</TableCell>
                       <TableCell className="font-bold! text-gray-900!">{eq.name || '-'}</TableCell>
                       <TableCell>{eq.serial_number || '-'}</TableCell>
                       <TableCell>{eq.location || '-'}</TableCell>
                       <TableCell sx={{ maxWidth: 320 }} className="text-gray-500! text-xs! whitespace-normal break-words leading-5 py-3!">
                         {eq.description || '-'}
                       </TableCell>
-                      <TableCell className="text-gray-700!">{format(new Date(eq.commissioning_date), 'dd MMM yyyy')}</TableCell>
+                      <TableCell className="text-gray-700!">{format(new Date(eq.commissioning_date), 'dd/MM/yyyy')}</TableCell>
                       <TableCell className="font-semibold! text-gray-800!">{formatFrequency(eq)}</TableCell>
                       <TableCell>{renderDueDate(eq)}</TableCell>
                       <TableCell align="center" className="whitespace-nowrap">
                         <div className="flex justify-center gap-1">
-                          <Tooltip title="Reschedule">
+                              <Tooltip title="Reschedule">
                             <IconButton size="small" onClick={(e) => openOverridePopover(e, eq)} className="text-blue-600!">
                               <EventRepeatIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Duplicate">
+                            <IconButton size="small" onClick={() => openDuplicateDialog(eq)} className="text-gray-600!">
+                              <FileCopyIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Edit">
@@ -399,7 +454,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                     </TableRow>
                   ))}
                   {filteredEquipments.length === 0 && (
-                    <TableRow><TableCell colSpan={8} align="center" className="py-20 text-gray-400">No equipment found.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} align="center" className="py-20 text-gray-400">No equipment found.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -408,14 +463,58 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
       </div>
 
       {!isPendingTab && (
-        <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA]">
+        <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA] min-w-0 min-h-0">
           <InlineCalendar
             environmentId={activeEnvironmentId}
             refreshKey={calendarRefreshKey}
-            compact
           />
         </div>
       )}
+
+      <Dialog open={Boolean(duplicateEquipment)} onClose={() => setDuplicateEquipment(null)} maxWidth="sm" fullWidth>
+        <DialogTitle className="font-bold bg-gray-50 border-b border-gray-200 text-[#00A651]">
+          Duplicate Equipment
+        </DialogTitle>
+        <DialogContent className="pt-6 flex flex-col gap-4">
+          <Typography className="text-sm text-gray-700">Select the environment and location to duplicate the equipment into.</Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel id="duplicate-environment-label">Target Environment</InputLabel>
+            <Select
+              labelId="duplicate-environment-label"
+              value={duplicateEnvironmentId}
+              label="Target Environment"
+              onChange={(e) => handleDuplicateEnvironmentChange(e.target.value)}
+              className="rounded-none"
+            >
+              {environments.map(env => (
+                <MenuItem key={env.id} value={env.id}>{env.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth size="small">
+            <InputLabel id="duplicate-location-label">Target Location</InputLabel>
+            <Select
+              labelId="duplicate-location-label"
+              value={duplicateLocation}
+              label="Target Location"
+              onChange={(e) => setDuplicateLocation(e.target.value)}
+              className="rounded-none"
+            >
+              {duplicateLocationOptions.length > 0 ? (
+                duplicateLocationOptions.map(loc => (
+                  <MenuItem key={`${loc.id}-${loc.code}`} value={loc.code}>{loc.code}</MenuItem>
+                ))
+              ) : (
+                <MenuItem value="">No locations available</MenuItem>
+              )}
+            </Select>
+          </FormControl>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setDuplicateEquipment(null)} className="text-gray-600 hover:bg-gray-50 normal-case rounded-none">Cancel</Button>
+            <Button onClick={handleDuplicateConfirm} variant="contained" className="bg-[#00A651]! hover:bg-green-700! text-white normal-case rounded-none shadow-none">Duplicate</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ImportDocumentModal 
         isOpen={isImportModalOpen}
@@ -458,7 +557,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
           <div className="p-6 flex flex-col gap-4">
             <Typography variant="h6" className="font-bold text-[#00A651]">Report Details</Typography>
             <Typography><b>System:</b> {selectedLog.equipment_name}</Typography>
-            <Typography><b>Completed:</b> {format(new Date(selectedLog.completion_date), 'dd MMM yyyy')}</Typography>
+            <Typography><b>Completed:</b> {format(new Date(selectedLog.completion_date), 'dd/MM/yyyy')}</Typography>
             <Typography><b>Description:</b> {selectedLog.description}</Typography>
             {selectedLog.document_paths && selectedLog.document_paths.map((p, i) => (
               <Button key={i} href={`http://127.0.0.1:5000/${p.replace(/\\/g, '/')}`} target="_blank" variant="outlined" download className="rounded-none">

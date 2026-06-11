@@ -117,8 +117,8 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
     .filter(task => task.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <div className="h-full flex overflow-hidden">
-      <div className="flex-[6.5] flex flex-col h-full bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
+    <div className="h-full flex overflow-hidden min-h-0">
+      <div className="flex-[6.5] flex flex-col h-full min-h-0 overflow-hidden bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
         <div className="shrink-0 p-6 border-b border-gray-100">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
             <Typography variant="h5" className="text-[#00A651] font-bold">
@@ -219,12 +219,14 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
           </div>
         </div>
 
-        <TableContainer component={Paper} elevation={0} className="flex-1 overflow-y-auto overflow-x-auto rounded-none shadow-none">
+        <TableContainer component={Paper} elevation={0} className="flex-1 min-h-0 overflow-hidden overflow-y-auto overflow-x-auto rounded-none shadow-none">
         <Table stickyHeader sx={{ tableLayout: 'auto' }}>
           <TableHead className="bg-gray-100/50">
             <TableRow>
+              <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">S.NO</TableCell>
               <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">SYSTEM NAME</TableCell>
               <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">ENVIRONMENT</TableCell>
+              <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">LOCATION</TableCell>
               <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">DESCRIPTION</TableCell>
               <TableCell className="font-bold! text-[#64748b]! bg-gray-100/90!">
                 <TableSortLabel
@@ -246,22 +248,24 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                 const dB = new Date(b.next_maintenance_date).getTime();
                 return sortOrder === 'asc' ? dA - dB : dB - dA;
               })
-              .map(task => {
+              .map((task, index) => {
                 const canComplete = task.next_maintenance_date.startsWith(format(new Date(), 'yyyy-MM-dd')) || task.status === 'overdue';
                 const rowKey = task.task_id || task.id;
                 return (
               <TableRow key={rowKey} hover className="transition-colors border-b border-gray-100 last:border-0">
+                <TableCell>{index + 1}</TableCell>
                 <TableCell>
                   <span className="font-semibold text-gray-900">{task.name}</span>
                 </TableCell>
                 <TableCell className="text-gray-600 font-medium">{task.environment_name}</TableCell>
+                <TableCell className="text-gray-600 font-medium">{task.location || task.location_name || '-'}</TableCell>
                 <TableCell sx={{ maxWidth: 320 }}>
                   <div className="text-gray-600 text-sm whitespace-normal break-words leading-5">
                     {task.description || "-"}
                   </div>
                 </TableCell>
                 <TableCell className="font-medium text-gray-900">
-                  {format(new Date(task.next_maintenance_date), 'dd MMM yyyy')}
+                  {format(new Date(task.next_maintenance_date), 'dd/MM/yyyy')}
                 </TableCell>
                 <TableCell>
                   <Chip 
@@ -308,7 +312,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
             })}
             {visibleTasks.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center" className="py-12">
+                <TableCell colSpan={8} align="center" className="py-12">
                   <Typography className="text-gray-400 italic">No maintenance tasks due for this period.</Typography>
                 </TableCell>
               </TableRow>
@@ -318,7 +322,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
         </TableContainer>
       </div>
 
-      <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA]">
+      <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA] min-w-0 min-h-0">
         <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} refreshKey={refreshKey} compact />
       </div>
 

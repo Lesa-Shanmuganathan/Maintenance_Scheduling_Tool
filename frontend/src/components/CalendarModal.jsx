@@ -173,7 +173,7 @@ const CalendarModal = ({ isOpen, onClose, equipmentId, equipmentName }) => {
         </DialogTitle>
         <DialogContent sx={{ px: 3, pb: 4, pt: '28px !important', overflowY: 'visible' }}>
           <Typography sx={{ color: '#4b5563', fontSize: '15px', mb: 3.5, lineHeight: 1.6 }}>
-            Reschedule the maintenance originally planned for <strong style={{color: '#111827', borderBottom: '2px solid #bbf7d0', paddingBottom: '1px'}}>{editingDate ? dayjs(editingDate.original_date).format('DD MMM YYYY') : ''}</strong>.
+            Reschedule the maintenance originally planned for <strong style={{color: '#111827', borderBottom: '2px solid #bbf7d0', paddingBottom: '1px'}}>{editingDate ? dayjs(editingDate.original_date).format('DD/MM/YYYY') : ''}</strong>.
           </Typography>
           <TextField
             type="date"
