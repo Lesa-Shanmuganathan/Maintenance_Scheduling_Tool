@@ -1581,10 +1581,29 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
     Background worker:
     1. Perform hybrid LLM extraction on full text to find tasks missed by table parser.
     2. Classify each system's environment.
+    Progress is reported in two phases:
+      Phase 1 (scan): progress / scan_total  → maps to 0–40% of the bar
+      Phase 2 (classify): progress / total   → maps to 40–100% of the bar
     """
     try:
+        # ── Phase 1: LLM text scan for additional systems ───────────────────
         if full_text and full_text.strip():
-            TASK_STORE[task_id]["current_item"] = "Scanning document for additional maintenance tasks (this may take a moment)..."
+            chunk_size = 12000
+            keywords = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'annual',
+                        'maintenance', 'inspection', 'check', 'every', 'interval', 'period']
+
+            # Count how many chunks we'll actually process so the bar can advance
+            chunks = [full_text[i:i + chunk_size] for i in range(0, len(full_text), chunk_size)]
+            relevant_chunks = [c for c in chunks if c.strip() and any(kw in c.lower() for kw in keywords)]
+            scan_total = max(len(relevant_chunks), 1)
+
+            TASK_STORE[task_id].update({
+                "phase": "scanning",
+                "scan_progress": 0,
+                "scan_total": scan_total,
+                "current_item": "Scanning document for additional maintenance tasks...",
+            })
+
             prompt = (
                 "You are an expert maintenance engineer. Extract any system or equipment "
                 "and its maintenance schedule mentioned in the text. Return a JSON array "
@@ -1592,15 +1611,15 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                 "freq_years, freq_label, confidence. "
                 "Ensure the output is STRICTLY a valid JSON array."
             )
-            chunk_size = 12000
-            seen_keys = set((s['name'].lower().strip(), s.get('freq_label', '').lower()) for s in extracted_systems)
-            keywords = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'annual', 'maintenance', 'inspection', 'check', 'every', 'interval', 'period']
-            
-            for i in range(0, len(full_text), chunk_size):
-                chunk = full_text[i:i + chunk_size]
-                if not chunk.strip(): continue
-                if not any(kw in chunk.lower() for kw in keywords): continue
-                
+            seen_keys = set((s['name'].lower().strip(), s.get('freq_label', '').lower())
+                            for s in extracted_systems)
+
+            for chunk_idx, chunk in enumerate(relevant_chunks):
+                TASK_STORE[task_id]["current_item"] = (
+                    f"Scanning document section {chunk_idx + 1} of {scan_total}..."
+                )
+                TASK_STORE[task_id]["scan_progress"] = chunk_idx
+
                 try:
                     payload = {
                         "model": AI_MODEL,
@@ -1612,12 +1631,13 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                         "max_tokens": 2000
                     }
                     hdrs = {"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"}
-                    resp = requests.post(f"{AI_API_BASE.rstrip('/')}/v1/chat/completions", json=payload, headers=hdrs, timeout=60)
+                    resp = requests.post(
+                        f"{AI_API_BASE.rstrip('/')}/v1/chat/completions",
+                        json=payload, headers=hdrs, timeout=60
+                    )
                     if resp.status_code == 200:
                         raw = resp.json()["choices"][0]["message"]["content"].strip()
-                        import re
-                        import json
-                        
+
                         items = []
                         m = re.search(r'\[.*\]', raw, re.DOTALL)
                         if m:
@@ -1625,7 +1645,6 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                             try:
                                 items = json.loads(json_str)
                             except json.JSONDecodeError:
-                                # Try to fix common JSON issues
                                 json_str = re.sub(r'\}\s*\{', '}, {', json_str)
                                 json_str = re.sub(r'\]\s*\[', '], [', json_str)
                                 json_str = re.sub(r',\s*\]', ']', json_str)
@@ -1634,18 +1653,18 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                                     items = json.loads(json_str)
                                 except Exception:
                                     pass
-                        
+
                         if not items:
-                            # Fallback: extract individual objects via regex
                             for obj_match in re.finditer(r'\{[^{}]*"name"[^{}]*\}', raw, re.DOTALL):
                                 try:
                                     obj_str = re.sub(r',\s*\}', '}', obj_match.group(0))
                                     items.append(json.loads(obj_str))
                                 except Exception:
                                     pass
-                                    
+
                         for s in items:
-                            if not isinstance(s, dict) or not s.get('name'): continue
+                            if not isinstance(s, dict) or not s.get('name'):
+                                continue
                             name_str = str(s['name']).strip()
                             freq_label = str(s.get('freq_label', '')).strip()
                             key = (name_str.lower(), freq_label.lower())
@@ -1654,13 +1673,10 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                                 ft = s.get('freq_type', 'Yearly')
                                 if ft not in ['Daily', 'Weekly', 'Monthly', 'Custom', 'Yearly']:
                                     ft = 'Yearly'
-                                
                                 raw_conf = float(s.get('confidence', 0.5))
                                 if raw_conf > 1.0:
                                     raw_conf = raw_conf / 100.0
-                                # Cap LLM-extracted confidence at 0.70 — lower than table-parsed items
                                 raw_conf = max(0.0, min(0.70, raw_conf))
-                                
                                 extracted_systems.append({
                                     'name': name_str,
                                     'description': str(s.get('description', '')).strip(),
@@ -1673,13 +1689,24 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
                                     'source': 'llm_extraction',
                                     'confidence': raw_conf
                                 })
-                    # Dynamically update total items discovered
+
+                    # Update totals as we discover more items
                     TASK_STORE[task_id]["total"] = len(extracted_systems)
+                    TASK_STORE[task_id]["scan_progress"] = chunk_idx + 1
+
                 except Exception as e:
                     print(f"[Background LLM Extraction] Failed on chunk: {e}")
+                    TASK_STORE[task_id]["scan_progress"] = chunk_idx + 1
 
+        # ── Phase 2: per-system AI classification ───────────────────────────
         use_doc_env = bool(doc_context and doc_context.get('confidence', 0) >= 0.80)
-        TASK_STORE[task_id]["total"] = len(extracted_systems) # Ensure final total is correct
+        total_systems = len(extracted_systems)
+        TASK_STORE[task_id].update({
+            "phase": "classifying",
+            "total": total_systems,
+            "progress": 0,
+            "current_item": "Starting classification...",
+        })
 
         for i, s in enumerate(extracted_systems):
             TASK_STORE[task_id]["current_item"] = s.get("name", "Unknown")
@@ -1706,6 +1733,7 @@ def process_classification_task(task_id, extracted_systems, doc_context=None, fu
 
         TASK_STORE[task_id]["status"] = "completed"
         TASK_STORE[task_id]["results"] = extracted_systems
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1810,8 +1838,11 @@ def classify_document():
         task_id = str(uuid.uuid4())
         TASK_STORE[task_id] = {
             "status": "processing",
+            "phase": "scanning",
             "progress": 0,
-            "total": len(extracted_systems) if extracted_systems else 1, # Prevent division by zero if empty
+            "total": len(extracted_systems) if extracted_systems else 1,
+            "scan_progress": 0,
+            "scan_total": 1,
             "current_item": "Initializing...",
             "results": [],
             "doc_context": doc_context
@@ -2159,4 +2190,23 @@ def admin_get_equipments():
 
 if __name__ == '__main__':
     seed_database()
-    app.run(debug=True, port=5000)
+    import sys
+
+    # Restrict the watchdog reloader to only watch this project directory.
+    # Without this, Flask/watchdog detects stdlib files being imported at startup
+    # (netrc.py, encodings/*.py, etc.) as "changes" and restarts 2-3 times before
+    # the server stabilises — causing the first upload attempt to fail.
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+
+    app.run(
+        debug=True,
+        port=5000,
+        use_reloader=True,
+        reloader_type='watchdog',
+        extra_files=[],          # don't add extra watch paths
+        # Exclude the Python stdlib and site-packages from being watched
+        exclude_patterns=[
+            os.path.join(sys.prefix, '*'),
+            os.path.join(sys.base_prefix, '*'),
+        ],
+    )

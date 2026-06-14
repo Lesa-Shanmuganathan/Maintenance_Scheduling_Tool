@@ -91,15 +91,33 @@ const ImportDocumentModal = ({ isOpen, onClose, onSuccess }) => {
     }
   };
 
-  // Calculate percentage
-  const progressPercent = taskStatus && taskStatus.total > 0 
-    ? Math.round((taskStatus.progress / taskStatus.total) * 100) 
-    : 0;
+  // Two-phase blended progress:
+  //  Phase 1 (scanning):    scan_progress / scan_total  -> 0%-40%
+  //  Phase 2 (classifying): progress / total            -> 40%-100%
+  const progressPercent = (() => {
+    if (!taskStatus || taskStatus.status === 'uploading') return 0;
+    const phase = taskStatus.phase;
+    if (phase === 'scanning' || (!phase && taskStatus.progress === 0)) {
+      const scanProg = taskStatus.scan_progress || 0;
+      const scanTotal = taskStatus.scan_total || 1;
+      return Math.round((scanProg / scanTotal) * 40);
+    }
+    const prog = taskStatus.progress || 0;
+    const total = taskStatus.total || 1;
+    return Math.round(40 + (prog / total) * 60);
+  })();
+
+  const phaseLabel = (() => {
+    if (!taskStatus || taskStatus.status === 'uploading') return '';
+    if (taskStatus.phase === 'scanning' || (!taskStatus.phase && taskStatus.progress === 0))
+      return 'Scanning Document';
+    return 'AI Classification in Progress';
+  })();
 
   return (
     <Dialog open={isOpen} onClose={loading ? undefined : handleClose} maxWidth="sm" fullWidth PaperProps={{ className: 'p-6 rounded-none' }}>
       <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-2">
-        <Typography variant="h6" className="font-bold text-[#00A651]">Import from Document</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700, color: '#005A99' }}>Import from Document</Typography>
         {!loading && (
           <IconButton onClick={handleClose} size="small">
             <CloseIcon />
@@ -127,25 +145,33 @@ const ImportDocumentModal = ({ isOpen, onClose, onSuccess }) => {
               <Button variant="outlined" component="span" disabled={loading} className="normal-case rounded-none border-gray-300 text-gray-700 font-semibold mb-2">
                 Choose File
               </Button>
-              {file && <Typography className="text-[#00A651] font-bold text-sm mt-2">{file.name}</Typography>}
+              {file && <Typography sx={{ color: '#005A99', fontWeight: 600 }} className="text-sm mt-2">{file.name}</Typography>}
             </label>
           </div>
         ) : (
           <div className="flex flex-col gap-4 p-8 items-center bg-gray-50/50 border border-gray-100">
             {taskStatus?.status === 'uploading' ? (
               <>
-                <CircularProgress size={40} className="text-[#00A651]!" />
+                <CircularProgress size={40} sx={{ color: '#00A4C7' }} />
                 <Typography className="font-bold text-gray-700 mt-2">Uploading file and parsing tables...</Typography>
               </>
             ) : (
               <>
-                <Typography className="font-bold text-gray-800 text-lg">AI Classification in Progress</Typography>
+                <Typography className="font-bold text-gray-800 text-lg">{phaseLabel}</Typography>
                 <Box sx={{ width: '100%', mr: 1 }}>
-                  <LinearProgress variant="determinate" value={progressPercent} className="h-3! rounded-none! bg-gray-200!" sx={{ '& .MuiLinearProgress-bar': { backgroundColor: '#00A651' } }} />
+                  <LinearProgress
+                    variant="determinate"
+                    value={progressPercent}
+                    className="h-3! bg-gray-200!"
+                    sx={{ borderRadius: 4, '& .MuiLinearProgress-bar': { background: 'linear-gradient(90deg, #005A99, #00A4C7)', transition: 'transform 0.4s ease' } }}
+                  />
                 </Box>
                 <div className="flex justify-between w-full mt-1">
                   <Typography className="text-xs font-bold text-gray-500 uppercase">{progressPercent}% Completed</Typography>
-                  <Typography className="text-xs font-bold text-gray-500">{taskStatus?.progress || 0} / {taskStatus?.total || 0} Systems</Typography>
+                  {taskStatus?.phase === 'scanning'
+                    ? <Typography className="text-xs font-bold text-gray-500">Section {taskStatus?.scan_progress || 0} / {taskStatus?.scan_total || 1}</Typography>
+                    : <Typography className="text-xs font-bold text-gray-500">{taskStatus?.progress || 0} / {taskStatus?.total || 0} Systems</Typography>
+                  }
                 </div>
                 {taskStatus?.current_item && (
                   <Typography className="text-sm text-gray-600 mt-2 truncate max-w-full italic">
@@ -167,9 +193,10 @@ const ImportDocumentModal = ({ isOpen, onClose, onSuccess }) => {
           {!loading && (
             <Button
               variant="contained"
+              color="primary"
               onClick={handleUpload}
               disabled={!file}
-              className="bg-black! text-white! font-bold py-2.5 px-6 rounded-none normal-case hover:bg-gray-800!"
+              className="text-white! font-semibold py-2.5 px-6 normal-case"
             >
               Upload & Classify
             </Button>

@@ -147,8 +147,8 @@ const AdminPage = () => {
   if (!isAuthenticated) {
     return (
       <div className="h-full flex items-center justify-center">
-        <form onSubmit={handleLogin} className="w-full max-w-sm bg-white border border-gray-100 shadow-sm p-6 flex flex-col gap-4">
-          <Typography variant="h5" className="text-[#00A651] font-bold">Admin Login</Typography>
+        <form onSubmit={handleLogin} className="w-full max-w-sm bg-white border border-[rgba(0,90,153,0.12)] shadow-[0_1px_3px_rgba(0,0,0,0.06),_0_4px_12px_rgba(0,90,153,0.04)] p-8 flex flex-col gap-5 rounded-xl">
+          <Typography variant="h5" sx={{ color: '#005A99', fontWeight: 700 }}>Admin Login</Typography>
           <TextField
             label="Username"
             value={username}
@@ -164,7 +164,7 @@ const AdminPage = () => {
             size="small"
           />
           {authError && <Typography className="text-sm text-red-600">{authError}</Typography>}
-          <Button type="submit" variant="contained" disabled={isLoggingIn} className="bg-black! text-white! rounded-none">
+          <Button type="submit" variant="contained" color="primary" disabled={isLoggingIn} className="text-white!">
             {isLoggingIn ? 'Logging in...' : 'Login'}
           </Button>
         </form>
@@ -177,7 +177,7 @@ const AdminPage = () => {
       <div className="h-full min-h-0 bg-white border border-gray-100 shadow-sm flex flex-col">
         <div className="shrink-0 px-6 py-5 border-b border-gray-100 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <Typography variant="h5" className="text-[#00A651] font-bold">Admin Console</Typography>
+            <Typography variant="h5" sx={{ color: '#005A99', fontWeight: 700 }}>Admin Console</Typography>
             <Typography variant="body2" className="text-gray-500 mt-1">
               Manage environments and their assigned locations.
             </Typography>
@@ -185,7 +185,7 @@ const AdminPage = () => {
           <Button
             variant="outlined"
             startIcon={<LogoutIcon />}
-            className="rounded-none border-gray-300! text-gray-700! normal-case self-start md:self-auto"
+            className="border-[rgba(0,90,153,0.3)]! text-[#005A99]! normal-case self-start md:self-auto"
             onClick={handleLogout}
           >
             Logout
@@ -254,8 +254,8 @@ const AdminPage = () => {
                     <TableCell align="right" className="pr-6!">
                       {editingEnvId === env.id ? (
                         <div className="flex gap-2 justify-end">
-                          <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateEnv(env.id)}>Save</Button>
-                          <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingEnvId(null)}>Cancel</Button>
+                          <Button size="small" variant="contained" color="primary" className="text-white!" onClick={() => handleUpdateEnv(env.id)}>Save</Button>
+                          <Button size="small" variant="outlined" onClick={() => setEditingEnvId(null)}>Cancel</Button>
                         </div>
                       ) : (
                         <div className="flex gap-2 justify-end">
@@ -270,7 +270,12 @@ const AdminPage = () => {
                             variant={expandedEnvId === env.id ? 'contained' : 'outlined'}
                             endIcon={expandedEnvId === env.id ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
                             onClick={() => setExpandedEnvId(expandedEnvId === env.id ? null : env.id)}
-                            className={`${expandedEnvId === env.id ? 'bg-[#00A651]! text-white!' : 'border-gray-300! text-gray-700!'} rounded-none normal-case`}
+                            color={expandedEnvId === env.id ? 'primary' : 'inherit'}
+                            className={`${
+                              expandedEnvId === env.id
+                                ? 'text-white!'
+                                : 'border-[rgba(0,90,153,0.3)]! text-[#005A99]!'
+                            } normal-case`}
                           >
                             Locations
                           </Button>
@@ -314,8 +319,8 @@ const AdminPage = () => {
                                   <TableCell align="right" className="pr-4!">
                                     {editingLocationId === location.id ? (
                                       <div className="flex gap-2 justify-end">
-                                        <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={() => handleUpdateLocation(location.id)}>Save</Button>
-                                        <Button size="small" variant="outlined" className="rounded-none" onClick={() => setEditingLocationId(null)}>Cancel</Button>
+                                        <Button size="small" variant="contained" color="primary" className="text-white!" onClick={() => handleUpdateLocation(location.id)}>Save</Button>
+                                        <Button size="small" variant="outlined" onClick={() => setEditingLocationId(null)}>Cancel</Button>
                                       </div>
                                     ) : (
                                       <div className="flex gap-1 justify-end">
@@ -352,8 +357,9 @@ const AdminPage = () => {
                             />
                             <Button
                               variant="contained"
+                              color="primary"
                               startIcon={<AddIcon />}
-                              className="bg-black! text-white! rounded-none normal-case h-10"
+                              className="text-white! normal-case h-10"
                               onClick={() => handleAddLocation(env.id)}
                             >
                               Add Location
@@ -374,8 +380,9 @@ const AdminPage = () => {
             <TextField size="small" label="Description" value={newEnvDesc} onChange={e => setNewEnvDesc(e.target.value)} />
             <Button
               variant="contained"
+              color="primary"
               startIcon={<AddIcon />}
-              className="bg-black! text-white! rounded-none normal-case h-10"
+              className="text-white! normal-case h-10"
               onClick={handleAddEnv}
             >
               Add Environment

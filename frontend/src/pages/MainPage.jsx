@@ -248,15 +248,15 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
             value={activeTab} 
             onChange={handleTabChange} 
             className="bg-transparent -mb-[1px]"
-            TabIndicatorProps={{ className: 'bg-[#00A651]! h-[3px]!' }}
+            TabIndicatorProps={{ style: { backgroundColor: '#005A99', height: 3, borderRadius: '3px 3px 0 0' } }}
           >
             <Tab 
               label="Equipments"
-              className="py-4 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-6" 
+              className="py-4 text-[14px] font-semibold tracking-wide transition-all data-[selected=true]:text-[#005A99]! hover:text-[#005A99] rounded-none px-6" 
             />
             <Tab 
               label="Pending Review"
-              className="py-4 text-[14px] font-bold tracking-wide transition-all data-[selected=true]:text-[#00A651]! hover:text-gray-900 rounded-none px-8" 
+              className="py-4 text-[14px] font-semibold tracking-wide transition-all data-[selected=true]:text-[#005A99]! hover:text-[#005A99] rounded-none px-8" 
             />
           </Tabs>
 
@@ -299,7 +299,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                   <Button 
                     variant="outlined" 
                     onClick={() => setIsImportModalOpen(true)}
-                    className="border-gray-300! text-gray-700! font-bold py-2 px-4 transition-all hover:bg-gray-50! rounded-none shadow-sm normal-case text-sm"
+                    className="border-[rgba(0,90,153,0.3)]! text-[#005A99]! font-semibold py-2 px-4 transition-all hover:bg-[rgba(0,90,153,0.05)]! rounded-lg shadow-sm normal-case text-sm"
                   >
                     Import from Document
                   </Button>
@@ -310,7 +310,8 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                       setEditingEquipment(null);
                       setIsModalOpen(true);
                     }}
-                    className="bg-black! text-white! font-bold py-2 px-4 transition-all hover:bg-gray-800! rounded-none shadow-sm normal-case text-sm"
+                    className="text-white! font-semibold py-2 px-4 transition-all rounded-lg shadow-sm normal-case text-sm"
+                    color="primary"
                   >
                     Add Equipment
                   </Button>
@@ -324,7 +325,11 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                     label="All" 
                     size="small"
                     onClick={() => { setEnvironmentFilter('All'); setLocationFilter('All'); }} 
-                    className={`rounded-sm font-bold cursor-pointer transition-all ${environmentFilter === 'All' ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
+                    className={`font-semibold cursor-pointer transition-all ${
+                      environmentFilter === 'All'
+                        ? 'bg-[#005A99]! text-white! shadow-sm'
+                        : 'bg-[rgba(0,90,153,0.06)]! text-[#005A99]! hover:bg-[rgba(0,90,153,0.1)]!'
+                    }`}
                   />
                   {environments.map(env => (
                     <Chip 
@@ -332,7 +337,11 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                       label={env.name} 
                       size="small"
                       onClick={() => { setEnvironmentFilter(env.name); setLocationFilter('All'); }} 
-                      className={`rounded-sm font-bold cursor-pointer transition-all ${environmentFilter === env.name ? 'bg-[#00A651]! text-white! shadow-sm' : 'bg-gray-100! text-gray-700! hover:bg-gray-200!'}`}
+                      className={`font-semibold cursor-pointer transition-all ${
+                        environmentFilter === env.name
+                          ? 'bg-[#005A99]! text-white! shadow-sm'
+                          : 'bg-[rgba(0,90,153,0.06)]! text-[#005A99]! hover:bg-[rgba(0,90,153,0.1)]!'
+                      }`}
                     />
                   ))}
                 </div>
@@ -418,8 +427,8 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                       <TableCell>{renderDueDate(eq)}</TableCell>
                       <TableCell align="center" className="whitespace-nowrap">
                         <div className="flex justify-center gap-1">
-                              <Tooltip title="Reschedule">
-                            <IconButton size="small" onClick={(e) => openOverridePopover(e, eq)} className="text-blue-600!">
+                          <Tooltip title="Reschedule">
+                            <IconButton size="small" onClick={(e) => openOverridePopover(e, eq)} style={{ color: '#005A99' }}>
                               <EventRepeatIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -429,7 +438,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Edit">
-                            <IconButton size="small" onClick={() => { setEditingEquipment(eq); setIsModalOpen(true); }} className="text-[#00A651]!">
+                            <IconButton size="small" onClick={() => { setEditingEquipment(eq); setIsModalOpen(true); }} style={{ color: '#00A4C7' }}>
                               <EditIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -472,7 +481,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
       )}
 
       <Dialog open={Boolean(duplicateEquipment)} onClose={() => setDuplicateEquipment(null)} maxWidth="sm" fullWidth>
-        <DialogTitle className="font-bold bg-gray-50 border-b border-gray-200 text-[#00A651]">
+        <DialogTitle sx={{ fontWeight: 700, background: '#f8fafc', borderBottom: '1px solid rgba(0,90,153,0.12)', color: '#005A99' }}>
           Duplicate Equipment
         </DialogTitle>
         <DialogContent className="pt-6 flex flex-col gap-4">
@@ -510,8 +519,10 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
             </Select>
           </FormControl>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setDuplicateEquipment(null)} className="text-gray-600 hover:bg-gray-50 normal-case rounded-none">Cancel</Button>
-            <Button onClick={handleDuplicateConfirm} variant="contained" className="bg-[#00A651]! hover:bg-green-700! text-white normal-case rounded-none shadow-none">Duplicate</Button>
+            <Button onClick={() => setDuplicateEquipment(null)} className="text-gray-600 hover:bg-gray-50 normal-case">Cancel</Button>
+            <Button onClick={handleDuplicateConfirm} variant="contained" color="primary" className="text-white normal-case shadow-none">
+              Duplicate
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -546,7 +557,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
           />
           <div className="flex gap-2 justify-end mt-2">
             <Button size="small" onClick={() => setPopoverAnchor(null)}>Cancel</Button>
-            <Button size="small" variant="contained" className="bg-[#00A651]! rounded-none" onClick={saveOverride}>Save</Button>
+            <Button size="small" variant="contained" color="primary" onClick={saveOverride}>Save</Button>
           </div>
         </div>
       </Popover>
@@ -555,7 +566,7 @@ const MainPage = ({ refreshKey = 0, onDataMutated }) => {
       <Dialog open={Boolean(selectedLog)} onClose={handleCloseReport} maxWidth="sm" fullWidth>
         {selectedLog && (
           <div className="p-6 flex flex-col gap-4">
-            <Typography variant="h6" className="font-bold text-[#00A651]">Report Details</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: '#005A99' }}>Report Details</Typography>
             <Typography><b>System:</b> {selectedLog.equipment_name}</Typography>
             <Typography><b>Completed:</b> {format(new Date(selectedLog.completion_date), 'dd/MM/yyyy')}</Typography>
             <Typography><b>Description:</b> {selectedLog.description}</Typography>

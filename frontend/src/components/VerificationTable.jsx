@@ -122,9 +122,10 @@ const VerificationTable = ({ systems, onComplete, isPendingTab = false, onAction
         </div>
         {(!isPendingTab && allActioned) && (
           <Button 
-            variant="contained" 
+            variant="contained"
+            color="primary"
             onClick={onComplete}
-            className="bg-[#00A651]! text-white! font-bold py-2.5 px-8 rounded-none shadow-md"
+            className="text-white! font-semibold py-2.5 px-8 shadow-md"
           >
             Finish Import
           </Button>
@@ -199,7 +200,7 @@ const VerificationTable = ({ systems, onComplete, isPendingTab = false, onAction
                             variant="outlined" 
                             size="small"
                             onClick={() => handleAction(sys, 'accept', index)}
-                            className="border-green-600! text-green-700! hover:bg-green-50! rounded-none font-bold normal-case"
+                            className="border-[#005A99]! text-[#005A99]! hover:bg-[rgba(0,90,153,0.05)]! font-semibold normal-case"
                           >
                             Accept
                           </Button>
@@ -348,13 +349,14 @@ const VerificationTable = ({ systems, onComplete, isPendingTab = false, onAction
                             >
                               Cancel
                             </Button>
-                            <Button 
-                              variant="contained" 
-                              onClick={() => saveEdit(sys, index)}
-                              className="bg-blue-600! text-white! rounded-none normal-case font-bold"
-                            >
-                              Save
-                            </Button>
+                             <Button 
+                               variant="contained"
+                               color="primary"
+                               onClick={() => saveEdit(sys, index)}
+                               className="text-white! normal-case font-semibold"
+                             >
+                               Save
+                             </Button>
                           </div>
                         </div>
                       </TableCell>

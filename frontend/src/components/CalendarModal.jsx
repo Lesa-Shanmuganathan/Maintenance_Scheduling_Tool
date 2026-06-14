@@ -96,8 +96,8 @@ const CalendarModal = ({ isOpen, onClose, equipmentId, equipmentName }) => {
     title: task.is_overridden ? 'MODIFIED' : 'MAINTENANCE',
     date: task.actual_date,
     extendedProps: task,
-    backgroundColor: task.is_overridden ? '#f59e0b' : '#00A651',
-    borderColor: task.is_overridden ? '#d97706' : '#00A651',
+    backgroundColor: task.is_overridden ? '#f59e0b' : '#005A99',
+    borderColor: task.is_overridden ? '#d97706' : '#004478',
     textColor: '#ffffff'
   }));
 
@@ -115,14 +115,15 @@ const CalendarModal = ({ isOpen, onClose, equipmentId, equipmentName }) => {
             </div>
           ) : (
             <Box className="w-full h-full bg-white p-6 md:p-8" sx={{
-               '& .fc-toolbar-title': { fontSize: '1.5rem', fontWeight: 700, color: '#1f2937' },
-               '& .fc-button-primary': { backgroundColor: '#111827', borderColor: '#111827', textTransform: 'capitalize', fontWeight: 'bold' },
-               '& .fc-button-primary:hover': { backgroundColor: '#374151' },
+               '& .fc-toolbar-title': { fontSize: '1.5rem', fontWeight: 700, color: '#1e293b' },
+               '& .fc-button-primary': { backgroundColor: '#005A99', borderColor: '#005A99', textTransform: 'capitalize', fontWeight: '600', borderRadius: '8px !important' },
+               '& .fc-button-primary:hover': { backgroundColor: '#00A4C7', borderColor: '#00A4C7' },
+               '& .fc-button-primary:not(:disabled).fc-button-active': { backgroundColor: '#004478', borderColor: '#004478' },
                '& .fc-daygrid-day-number': { color: '#4b5563', fontWeight: 600, padding: '4px' },
                '& .fc-daygrid-event': { cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid', margin: '2px 4px' },
-               '& .fc-theme-standard td, & .fc-theme-standard th': { borderColor: '#e5e7eb' },
-               '& .fc-col-header-cell-cushion': { color: '#6b7280', fontWeight: 600, padding: '8px 0' },
-               '& .fc-day-today': { backgroundColor: '#f9fafb !important' }
+               '& .fc-theme-standard td, & .fc-theme-standard th': { borderColor: 'rgba(0,90,153,0.1)' },
+               '& .fc-col-header-cell-cushion': { color: '#64748b', fontWeight: 600, padding: '8px 0' },
+               '& .fc-day-today': { backgroundColor: 'rgba(0,90,153,0.04) !important' }
             }}>
               <FullCalendar
                 ref={calendarRef}
@@ -201,7 +202,8 @@ const CalendarModal = ({ isOpen, onClose, equipmentId, equipmentName }) => {
           <Button 
             onClick={handleOverrideSubmit} 
             variant="contained"
-            sx={{ backgroundColor: '#00A651', '&:hover': { backgroundColor: '#008f45' }, borderRadius: '6px', fontWeight: 'bold', textTransform: 'none', px: 3, py: 1, boxShadow: 'none' }}
+            color="primary"
+            sx={{ borderRadius: '8px', fontWeight: 'bold', textTransform: 'none', px: 3, py: 1, boxShadow: 'none' }}
           >
             Save Change
           </Button>

@@ -121,7 +121,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
       <div className="flex-[6.5] flex flex-col h-full min-h-0 overflow-hidden bg-white border-r border-gray-200 relative z-10 shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
         <div className="shrink-0 p-6 border-b border-gray-100">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-            <Typography variant="h5" className="text-[#00A651] font-bold">
+            <Typography variant="h5" sx={{ color: '#005A99', fontWeight: 700 }}>
               Synthesis Dashboard
             </Typography>
             <div className="flex gap-2">
@@ -129,7 +129,12 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                 variant={isTodayFilter ? "contained" : "outlined"} 
                 startIcon={<TodayIcon />} 
                 onClick={() => { setIsTodayFilter(!isTodayFilter); setIsOverdueFilter(false); }}
-                className={`font-bold rounded-none shrink-0 ${isTodayFilter ? 'bg-[#00A651]! text-white! border-[#00A651]!' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                color={isTodayFilter ? 'primary' : 'inherit'}
+                className={`font-semibold shrink-0 ${
+                  isTodayFilter
+                    ? 'text-white!'
+                    : 'border-[rgba(0,90,153,0.3)]! text-[#005A99]! hover:bg-[rgba(0,90,153,0.05)]!'
+                }`}
               >
                 Today
               </Button>
@@ -137,7 +142,11 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                 variant={isOverdueFilter ? "contained" : "outlined"} 
                 startIcon={<WarningAmberIcon />} 
                 onClick={() => { setIsOverdueFilter(!isOverdueFilter); setIsTodayFilter(false); }}
-                className={`font-bold rounded-none shrink-0 ${isOverdueFilter ? 'bg-red-600! text-white! border-red-600!' : 'border-gray-200 text-gray-600 hover:bg-red-50'}`}
+                className={`font-semibold shrink-0 ${
+                  isOverdueFilter
+                    ? 'bg-red-600! text-white! border-red-600!'
+                    : 'border-[rgba(220,38,38,0.3)]! text-red-600! hover:bg-red-50!'
+                }`}
               >
                 Overdue
               </Button>
@@ -145,7 +154,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                 variant="outlined" 
                 startIcon={<FilterAltOffIcon />} 
                 onClick={handleReset}
-                className="font-bold border-gray-200 text-gray-600 hover:bg-gray-50 rounded-none shrink-0"
+                className="font-semibold border-[rgba(0,90,153,0.3)]! text-[#005A99]! hover:bg-[rgba(0,90,153,0.05)]! shrink-0"
               >
                 Reset Filters
               </Button>
@@ -286,10 +295,10 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                       variant="outlined" 
                       disabled={!canComplete}
                       onClick={() => handleOpenCompleteModal(task)}
-                      className={`rounded-none text-[12px] py-1 px-4 shadow-none transition-all ${
+                      className={`text-[12px] py-1 px-4 shadow-none transition-all ${
                         !canComplete 
                           ? 'border-gray-200! text-gray-400!' 
-                          : 'hover:shadow-md text-[#2e7d32]! border-[#2e7d32]! hover:bg-[#2e7d320a]!'
+                          : 'hover:shadow-md text-[#005A99]! border-[#005A99]! hover:bg-[rgba(0,90,153,0.05)]!'
                       }`}
                     >
                       Complete
@@ -298,9 +307,9 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                     <Button 
                       size="small" 
                       variant="contained" 
-                      color="success"
+                      color="primary"
                       startIcon={<CheckCircleOutlineIcon />}
-                      className="rounded-none text-[12px] py-1 px-4 shadow-none bg-[#2e7d32]! text-white! cursor-default pointer-events-none"
+                      className="text-[12px] py-1 px-4 shadow-none text-white! cursor-default pointer-events-none"
                     >
                       Done
                     </Button>
@@ -323,7 +332,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
       </div>
 
       <div className="w-[280px] shrink-0 h-full overflow-hidden bg-[#FAFAFA] min-w-0 min-h-0">
-        <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} refreshKey={refreshKey} compact />
+        <InlineCalendar environmentId={selectedEnv === 'all' ? '' : selectedEnv} refreshKey={refreshKey} />
       </div>
 
       <Dialog 
@@ -333,7 +342,7 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
         fullWidth
         PaperProps={{ className: "rounded-none" }}
       >
-        <DialogTitle className="font-bold bg-gray-50 border-b border-gray-200 text-[#00A651]">
+        <DialogTitle sx={{ fontWeight: 700, background: '#f8fafc', borderBottom: '1px solid rgba(0,90,153,0.12)', color: '#005A99' }}>
           Complete Maintenance Task
         </DialogTitle>
         <DialogContent className="pt-6! flex flex-col gap-5">
@@ -382,8 +391,8 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
                 file:mr-4 file:py-2 file:px-4
                 file:border-0
                 file:text-sm file:font-semibold
-                file:bg-green-50 file:text-[#00A651]
-                hover:file:bg-green-100 cursor-pointer"
+                file:bg-[rgba(0,90,153,0.06)] file:text-[#005A99]
+                hover:file:bg-[rgba(0,90,153,0.1)] cursor-pointer"
             />
             {completeFormData.documents.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
@@ -413,8 +422,9 @@ const SynthesisDashboard = ({ refreshKey = 0 }) => {
           </Button>
           <Button 
             onClick={handleCompleteMaintenanceSubmit} 
-            variant="contained" 
-            className="bg-[#00A651]! hover:bg-green-700! text-white normal-case rounded-none shadow-none"
+            variant="contained"
+            color="primary"
+            className="text-white normal-case shadow-none"
           >
             Confirm Completion
           </Button>

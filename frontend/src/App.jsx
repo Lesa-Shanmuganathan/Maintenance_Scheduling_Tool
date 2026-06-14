@@ -17,28 +17,27 @@ const Header = () => {
       position="static" 
       elevation={0} 
       sx={{ 
-        background: 'linear-gradient(90deg, #00A651 0%, #0093AF 100%)' 
+        background: 'linear-gradient(160deg, #005A99 0%, #00A4C7 55%, #01C9B2 100%)',
+        boxShadow: '0 2px 8px rgba(0, 90, 153, 0.15)',
+        borderRadius: 0,
       }} 
-      className="py-6 rounded-none"
     >
       <Container maxWidth="xl">
-        <Toolbar disableGutters className="flex justify-between">
-          <div className="flex items-center">
-            <div className="mr-8 flex items-center">
-              <img src={logo} alt="AVL Logo" className="h-[75px] object-contain" />
-            </div>
+        <Toolbar disableGutters sx={{ minHeight: '70px !important', py: '8px' }} className="flex justify-between">
+          <div className="flex items-center gap-4">
+            <img src={logo} alt="AVL Logo" className="h-[52px] object-contain" />
             <div className="flex flex-col">
-              <Typography variant="h4" component="div" className="text-white font-bold tracking-tight leading-none mb-2">
+              <Typography variant="body1" component="div" sx={{ color: '#fff', fontWeight: 700, letterSpacing: '0.01em', lineHeight: 1.3 }}>
                 Maintenance Scheduling Tool
               </Typography>
-              <Typography variant="subtitle1" className="text-white/90 font-medium tracking-wide">
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)', fontWeight: 400, letterSpacing: '0.02em', fontSize: '0.72rem' }}>
                 Manage and track preventive maintenance of equipment
               </Typography>
             </div>
           </div>
           <div>
             <IconButton onClick={() => navigate('/admin')} sx={{ color: 'white' }}>
-              <SettingsIcon fontSize="large" />
+              <SettingsIcon />
             </IconButton>
           </div>
         </Toolbar>
@@ -49,14 +48,19 @@ const Header = () => {
 
 const Navigation = () => {
   return (
-    <nav className="border-b border-gray-200 bg-white flex justify-center sticky top-0 z-10 shrink-0">
+    <nav
+      className="bg-white flex justify-center sticky top-0 z-10 shrink-0"
+      style={{ borderBottom: '1px solid rgba(0, 90, 153, 0.12)', boxShadow: '0 2px 8px rgba(0, 90, 153, 0.05)' }}
+    >
       <Container maxWidth="xl">
-        <div className="flex gap-2">
+        <div className="flex gap-1">
           <NavLink 
             to="/" 
             className={({ isActive }) => 
-              `px-6 py-4 no-underline font-semibold border-b-3 transition-colors rounded-none ${
-                isActive ? 'text-[#00A651] border-[#00A651]' : 'text-[#64748b] border-transparent hover:text-gray-900'
+              `px-6 py-4 no-underline font-semibold border-b-[3px] transition-all rounded-none ${
+                isActive
+                  ? 'text-[#005A99] border-[#005A99] bg-[rgba(0,90,153,0.04)]'
+                  : 'text-[#64748b] border-transparent hover:text-[#005A99] hover:bg-[rgba(0,90,153,0.03)]'
               }`
             }
             end
@@ -66,8 +70,10 @@ const Navigation = () => {
           <NavLink 
             to="/environments" 
             className={({ isActive }) => 
-              `px-6 py-4 no-underline font-semibold border-b-3 transition-colors rounded-none ${
-                isActive ? 'text-[#00A651] border-[#00A651]' : 'text-[#64748b] border-transparent hover:text-gray-900'
+              `px-6 py-4 no-underline font-semibold border-b-[3px] transition-all rounded-none ${
+                isActive
+                  ? 'text-[#005A99] border-[#005A99] bg-[rgba(0,90,153,0.04)]'
+                  : 'text-[#64748b] border-transparent hover:text-[#005A99] hover:bg-[rgba(0,90,153,0.03)]'
               }`
             }
           >
@@ -76,8 +82,10 @@ const Navigation = () => {
           <NavLink 
             to="/logs" 
             className={({ isActive }) => 
-              `px-6 py-4 no-underline font-semibold border-b-3 transition-colors rounded-none ${
-                isActive ? 'text-[#00A651] border-[#00A651]' : 'text-[#64748b] border-transparent hover:text-gray-900'
+              `px-6 py-4 no-underline font-semibold border-b-[3px] transition-all rounded-none ${
+                isActive
+                  ? 'text-[#005A99] border-[#005A99] bg-[rgba(0,90,153,0.04)]'
+                  : 'text-[#64748b] border-transparent hover:text-[#005A99] hover:bg-[rgba(0,90,153,0.03)]'
               }`
             }
           >
@@ -129,7 +137,7 @@ function App() {
 
   return (
     <Router>
-      <div className="flex flex-col h-screen bg-[#F8F9FA] overflow-hidden">
+      <div className="flex flex-col h-screen bg-[#f0f4f8] overflow-hidden">
         <Header />
         <Navigation />
         <Container maxWidth="xl" className="grow flex flex-col py-8 overflow-hidden">

@@ -33,8 +33,11 @@ const LogsPage = () => {
 
   return (
     <div className="h-full flex flex-col overflow-hidden space-y-6">
-      <div className="shrink-0 bg-white p-6 border border-gray-100 shadow-sm flex flex-wrap gap-4 items-center">
-        <Typography variant="h5" className="text-[#00A651] font-bold mr-auto">Global Maintenance Logs</Typography>
+      <div
+        className="shrink-0 bg-white p-6 flex flex-wrap gap-4 items-center rounded-xl"
+        style={{ border: '1px solid rgba(0, 90, 153, 0.12)', boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,90,153,0.04)' }}
+      >
+        <Typography variant="h5" sx={{ color: '#005A99', fontWeight: 700 }} className="mr-auto">Global Maintenance Logs</Typography>
         
         <Select
           size="small"

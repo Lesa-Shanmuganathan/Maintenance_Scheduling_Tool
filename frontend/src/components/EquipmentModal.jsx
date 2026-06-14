@@ -170,7 +170,7 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, 
 
             {formData.freq_type === 'Custom' && (
               <div className="p-5 bg-gray-50 rounded-none border border-gray-100 flex flex-col gap-4">
-                <Typography className="text-[11px] font-bold tracking-widest text-[#00A651] uppercase">
+                <Typography sx={{ color: '#00A4C7', fontWeight: 700 }} className="text-[11px] tracking-widest uppercase">
                   Set Custom Duration
                 </Typography>
                 <div className="grid grid-cols-3 gap-4">
@@ -216,8 +216,9 @@ const EquipmentModal = ({ isOpen, onClose, onSave, environmentId, environments, 
           </Button>
           <Button 
             type="submit" 
-            variant="contained" 
-            className="bg-black! text-white! font-bold py-2.5 px-8 rounded-none shadow-lg hover:bg-gray-800! transition-all normal-case ring-offset-2 focus:ring-2 focus:ring-black"
+            variant="contained"
+            color="primary"
+            className="text-white! font-semibold py-2.5 px-8 shadow-none normal-case"
           >
             {initialData ? 'Update Record' : 'Save Equipment'}
           </Button>

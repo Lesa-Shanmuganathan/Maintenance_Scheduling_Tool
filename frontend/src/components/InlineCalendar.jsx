@@ -79,10 +79,10 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'overdue': return 'bg-[#C0392B]';
+      case 'overdue':  return 'bg-[#C0392B]';
       case 'due_soon': return 'bg-[#E67E22]';
-      case 'upcoming': return 'bg-[#00A651]';
-      default: return 'bg-gray-400';
+      case 'upcoming': return 'bg-[#005A99]';
+      default:         return 'bg-gray-400';
     }
   };
 
@@ -148,8 +148,8 @@ const InlineCalendar = ({ environmentId, refreshKey = 0, compact = false }) => {
               const dayEvents = getEventsForDay(day);
               const isCurrToday = isToday(day);
               return (
-                <div key={day.toString()} className={`relative bg-white border ${isCurrToday ? 'border-[#00A651]' : 'border-gray-100'} ${compact ? 'p-0.5' : 'p-1'} min-h-0 flex flex-col overflow-hidden`}>
-                  <div className={`text-[11px] font-bold ${isCurrToday ? 'text-[#00A651]' : 'text-gray-500'} ml-0.5`}>
+                <div key={day.toString()} className={`relative bg-white border ${isCurrToday ? 'border-[#005A99]' : 'border-[rgba(0,90,153,0.08)]'} ${compact ? 'p-0.5' : 'p-1'} min-h-0 flex flex-col overflow-hidden transition-all hover:border-[rgba(0,90,153,0.2)]`}>
+                  <div className={`text-[11px] font-bold ${isCurrToday ? 'text-[#005A99]' : 'text-gray-400'} ml-0.5`}>
                     {format(day, 'd')}
                   </div>
                   {dayEvents.length > 0 && (
