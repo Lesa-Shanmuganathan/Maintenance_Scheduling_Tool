@@ -19,6 +19,14 @@ class Location(db.Model):
     description = db.Column(db.Text, nullable=True)
     environment_id = db.Column(db.Integer, db.ForeignKey('environments.id'), nullable=False)
 
+class Admin(db.Model):
+    __tablename__ = 'admins'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
 class Equipment(db.Model):
     __tablename__ = 'equipments'
     id = db.Column(db.Integer, primary_key=True)

@@ -4,10 +4,11 @@ import re
 import io
 import secrets
 from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from models import db, Environment, Location, Equipment, MaintenanceOverride, MaintenanceHistory, PendingReview, CorrectionLog
+from models import db, Environment, Location, Admin, Equipment, MaintenanceOverride, MaintenanceHistory, PendingReview, CorrectionLog
 import pandas as pd
 import pdfplumber
 import fitz  # PyMuPDF
@@ -24,8 +25,6 @@ from datetime import datetime, date
 AI_API_BASE = os.getenv("AI_API_BASE", "http://localhost:1234")
 AI_API_KEY = os.getenv("AI_API_KEY", "lm-studio")
 AI_MODEL = os.getenv("AI_MODEL", "local-model") # LM studio ignores this and uses the loaded model
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 ADMIN_TOKEN_MAX_AGE = int(os.getenv("ADMIN_TOKEN_MAX_AGE", "28800"))
 
 app = Flask(__name__)
@@ -41,17 +40,23 @@ CORS(app)
 db.init_app(app)
 admin_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='admin-auth')
 
+def get_admin_by_username(username):
+    if not username:
+        return None
+    return Admin.query.filter_by(username=username, is_active=True).first()
+
+
 def create_admin_token(username):
     return admin_serializer.dumps({'username': username})
+
 
 def verify_admin_token(token):
     try:
         data = admin_serializer.loads(token, max_age=ADMIN_TOKEN_MAX_AGE)
     except (BadSignature, SignatureExpired):
         return None
-    if data.get('username') != ADMIN_USERNAME:
-        return None
-    return data
+    admin = get_admin_by_username(data.get('username'))
+    return admin
 
 def require_admin_auth(fn):
     @wraps(fn)
@@ -118,6 +123,7 @@ def seed_database():
                     for code in codes:
                         db.session.add(Location(code=code, environment_id=env.id))
             db.session.commit()
+        # Admins are created explicitly via a separate process for security.
 
 def calculate_next_maintenance(last_date, freq_type, freq_days=0, freq_months=0, freq_years=0):
     if freq_type == 'Daily':
@@ -2055,12 +2061,49 @@ def admin_login():
     data = request.json or {}
     username = data.get('username', '')
     password = data.get('password', '')
-    if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+    admin = get_admin_by_username(username)
+    if admin and check_password_hash(admin.password_hash, password):
         return jsonify({
             'token': create_admin_token(username),
             'expires_in': ADMIN_TOKEN_MAX_AGE
         })
     return jsonify({'error': 'Invalid admin username or password'}), 401
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_admin_auth
+def admin_list_users():
+    admins = Admin.query.order_by(Admin.username).all()
+    return jsonify([
+        {'id': a.id, 'username': a.username, 'is_active': a.is_active}
+        for a in admins
+    ])
+
+@app.route('/api/admin/users', methods=['POST'])
+@require_admin_auth
+def admin_create_user():
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    if Admin.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username already exists'}), 409
+    new_admin = Admin(username=username, password_hash=generate_password_hash(password))
+    db.session.add(new_admin)
+    db.session.commit()
+    return jsonify({'id': new_admin.id, 'username': new_admin.username, 'is_active': new_admin.is_active}), 201
+
+@app.route('/api/admin/users/<int:id>', methods=['PATCH'])
+@require_admin_auth
+def admin_update_user(id):
+    admin = Admin.query.get_or_404(id)
+    data = request.json or {}
+    if 'password' in data and data['password']:
+        admin.password_hash = generate_password_hash(data['password'])
+    if 'is_active' in data:
+        admin.is_active = bool(data['is_active'])
+    db.session.commit()
+    return jsonify({'id': admin.id, 'username': admin.username, 'is_active': admin.is_active})
 
 @app.route('/api/admin/environments', methods=['GET'])
 @require_admin_auth
